@@ -7,3 +7,8 @@ edition = "2021"
 
 [dependencies]
 bevy = { version = "0.5.0", features = ["dynamic"] }
+bevy_easings = "0.4.1"
+bevy_pixel_camera = "0.1.1"
+bevy_rapier2d = "0.11.0"
+benimator = "0.3.1"
+big-brain = "0.8.0"
