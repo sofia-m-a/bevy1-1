@@ -45,7 +45,7 @@ fn keyboard_input_system(
     }
 
     for (_, mut trans) in player.iter_mut() {
-        trans.translation += Vec3::new(5.0 * dir.x, 5.0 * dir.y, 0.0);
+        trans.translation += Vec3::new(8.0 * dir.x, 8.0 * dir.y, 0.0);
     }
 }
 
@@ -57,7 +57,7 @@ fn setup(
 ) {
     commands.spawn_bundle(PixelCameraBundle::from_resolution(960, 640));
 
-    let ([p1, p2, p3], animation) = setup_players(
+    let graphics = setup_textures(
         Duration::from_millis(60),
         asset_server,
         texture_atlases,
@@ -66,11 +66,11 @@ fn setup(
 
     commands
         .spawn_bundle(SpriteSheetBundle {
-            texture_atlas: p3,
+            texture_atlas: graphics.sheet,
             transform: Transform::from_scale(Vec3::splat(1.0)),
             ..Default::default()
         })
         .insert(Player)
-        .insert(animation)
+        .insert(graphics.p1_walk)
         .insert(Play);
 }
