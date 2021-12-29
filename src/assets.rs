@@ -3,23 +3,27 @@ use std::time::Duration;
 use benimator::{Frame, SpriteSheetAnimation};
 use bevy::prelude::*;
 use bevy::sprite::Rect;
+use bevy_loading::prelude::*;
 
-const SHEET: &str = "texture.png";
-
-pub struct Graphics {
-    pub sheet: Handle<TextureAtlas>,
+pub const TILE_SIZE: f32 = 70.0;
+pub struct SpriteAssets {
+    pub texture: Handle<TextureAtlas>,
     pub p1_walk: Handle<SpriteSheetAnimation>,
     pub p2_walk: Handle<SpriteSheetAnimation>,
     pub p3_walk: Handle<SpriteSheetAnimation>,
+
+    pub tile_texture: Handle<Texture>,
 }
 
-pub fn setup_textures(
-    duration: Duration,
-    asset_server: Res<AssetServer>,
+pub fn setup_sprites(
+    mut commands: Commands,
+    assets: Res<AssetServer>,
     mut texture_atlases: ResMut<Assets<TextureAtlas>>,
     mut animations: ResMut<Assets<SpriteSheetAnimation>>,
-) -> Graphics {
-    let handle = asset_server.load(SHEET);
+    mut loading: ResMut<AssetsLoading>,
+) {
+    let handle = assets.load("texture.png");
+    loading.add(&handle);
     let mut sheet = TextureAtlas::new_empty(handle, Vec2::new(2375.0, 2410.0));
 
     for &[x, y, w, h] in RECTS.iter() {
@@ -28,6 +32,8 @@ pub fn setup_textures(
             max: Vec2::new(x + w, y + h),
         });
     }
+
+    let duration = Duration::from_millis(60);
 
     let p1_walk = animations.add(make_animation(
         &[
@@ -80,12 +86,15 @@ pub fn setup_textures(
         duration,
     ));
 
-    Graphics {
-        sheet: texture_atlases.add(sheet),
+    let texture_handle = assets.load("tilesheet.png");
+
+    commands.insert_resource(SpriteAssets {
+        texture: texture_atlases.add(sheet),
         p1_walk,
         p2_walk,
         p3_walk,
-    }
+        tile_texture: texture_handle,
+    });
 }
 
 fn make_animation(frames: &[Tile], duration: Duration) -> SpriteSheetAnimation {
@@ -100,21 +109,10 @@ fn make_animation(frames: &[Tile], duration: Duration) -> SpriteSheetAnimation {
     )
 }
 
-//     let animation_handle = animations.add(SpriteSheetAnimation::from_range(PLAYER_WALK, duration));
-
-//     (
-//         [
-//             texture_atlases.add(p1_sheet),
-//             texture_atlases.add(p2_sheet),
-//             texture_atlases.add(p3_sheet),
-//         ],
-//         animation_handle,
-//     )
-// }
-
 #[allow(dead_code)]
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Tile {
+    Air,
     BgCastle,
     BgDesert,
     BgGrasslands,
@@ -1050,7 +1048,8 @@ pub enum Tile {
     WormHit,
 }
 
-const RECTS: &[[f32; 4]] = &[
+pub const RECTS: &[[f32; 4]] = &[
+    [0.0, 0.0, 70.0, 70.0], // Air
     [0.0, 0.0, 1024.0, 512.0],
     [0.0, 512.0, 1024.0, 512.0],
     [1024.0, 0.0, 1024.0, 512.0],
