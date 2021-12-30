@@ -1,3 +1,5 @@
+use bevy::reflect::erased_serde::private::serde::de::IgnoredAny;
+
 use crate::assets::{SHEET_H, SHEET_W};
 
 #[allow(dead_code)]
@@ -86,8 +88,33 @@ impl From<GroundSet> for u16 {
 
 #[allow(dead_code)]
 #[derive(Clone, Copy, PartialEq, Eq)]
+pub enum IglooPiece {
+    TopLeft,
+    TopMid,
+    TopRight,
+    Interior,
+    InteriorAlt,
+    Door,
+}
+
+impl From<IglooPiece> for u16 {
+    fn from(t: IglooPiece) -> u16 {
+        match t {
+            IglooPiece::TopLeft => 0,
+            IglooPiece::TopMid => 1,
+            IglooPiece::TopRight => 2,
+            IglooPiece::Interior => SHEET_W,
+            IglooPiece::InteriorAlt => 1 + SHEET_W,
+            IglooPiece::Door => 2 + SHEET_W,
+        }
+    }
+}
+
+#[allow(dead_code)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Tile {
     Ground(GroundTileType, GroundSet),
+    Igloo(IglooPiece),
     Air,
 }
 
@@ -96,6 +123,7 @@ impl From<Tile> for u16 {
         match t {
             Tile::Air => 0,
             Tile::Ground(t, s) => u16::from(t) + SHEET_W * u16::from(s),
+            Tile::Igloo(piece) => 20 + SHEET_W * 14 + u16::from(piece),
         }
     }
 }

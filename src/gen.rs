@@ -1,28 +1,140 @@
+use std::ops::Range;
+
 use bevy::prelude::*;
-use bevy_tilemap::{tilemap::TilemapResult, Tilemap};
+use bevy_ecs_tilemap::{LayerBuilder, MapTileError, TileBundle};
+use noise::{NoiseFn, Perlin, Seedable};
 use rand::prelude::*;
 use rand_pcg::Pcg64;
 
-use crate::{assets::SpriteAssets, brushes::Tile};
+use crate::{
+    assets::SpriteAssets,
+    brushes::{GroundSet, GroundTileType, IglooPiece, Tile},
+};
 
-pub fn generate_island(map: &mut Tilemap) -> TilemapResult<()> {
-    let mut tr = thread_rng();
-    let rng = Pcg64::from_rng(&mut tr);
-
-    let mut tiles = Vec::new();
-    for i in 0..=10 {
-        for j in 0..=10 {
-            tiles.push(bevy_tilemap::tile::Tile {
-                point: (i, j),
-                sprite_order: 0,
-                sprite_index: 27 * 21,
+fn place_tile(
+    b: &mut LayerBuilder<TileBundle>,
+    i: u32,
+    j: u32,
+    tile: Tile,
+) -> Result<(), MapTileError> {
+    b.set_tile(
+        UVec2::new(i, j),
+        TileBundle {
+            tile: bevy_ecs_tilemap::Tile {
+                texture_index: u16::from(tile),
                 ..Default::default()
-            });
+            },
+            ..Default::default()
+        },
+    )?;
+    Ok(())
+}
+
+fn place_igloo(
+    b: &mut LayerBuilder<TileBundle>,
+    rng: &mut Pcg64,
+    width: Range<u32>,
+    height: Range<u32>,
+) -> Result<(), MapTileError> {
+    for i in width.clone() {
+        for j in height.clone() {
+            let left = i == width.clone().start;
+            let right = i == width.clone().end - 1;
+            let top = j == height.clone().end - 1;
+            let piece = if left && top {
+                IglooPiece::TopLeft
+            } else if right && top {
+                IglooPiece::TopRight
+            } else if top {
+                IglooPiece::TopMid
+            } else {
+                *[IglooPiece::Interior, IglooPiece::InteriorAlt]
+                    .choose(rng)
+                    .unwrap()
+            };
+            place_tile(b, i, j, Tile::Igloo(piece))?;
         }
     }
 
-    //map.insert_chunk((0, 0))?;
-    map.insert_tiles(tiles)?;
-    println!("{:?}", map);
+    if height.len() >= 2 {
+        let door_location = rng.gen_range(width);
+        place_tile(
+            b,
+            door_location,
+            height.start,
+            Tile::Igloo(IglooPiece::Door),
+        )?;
+    }
+
+    Ok(())
+}
+
+pub fn generate_island(b: &mut LayerBuilder<TileBundle>) -> Result<(), MapTileError> {
+    let mut tr = thread_rng();
+    let mut rng = Pcg64::from_rng(&mut tr).unwrap();
+    let noise = noise::OpenSimplex::new().set_seed(rng.next_u32());
+
+    const chunk_size: usize = 128;
+    let mut height_map = [0; chunk_size];
+
+    for i in 0..(chunk_size as u32) {
+        let height = (12.0 * noise.get([(i as f64) * 0.04, i as f64 * 0.04]).abs()) as u32;
+        height_map[i as usize] = height;
+    }
+
+    for i in 0..(chunk_size as i32) {
+        let left = height_map[i32::clamp(i - 1, 0, (chunk_size - 1) as i32) as usize];
+        let right = height_map[i32::clamp(i + 1, 0, (chunk_size - 1) as i32) as usize];
+        let current = height_map[i as usize];
+
+        let slope_up = right == left + 1 && current == right; // current == left + 1 && !(right < left);
+        let slope_down = left == right + 1 && current == left; // left == current + 1 && !(right > left);
+
+        for j in 0..=current {
+            let top = j == current;
+            let top1 = current != 0 && j == (current - 1);
+
+            let tile = if top && slope_up {
+                GroundTileType::SlopeUp
+            } else if top && slope_down {
+                GroundTileType::SlopeDown
+            } else if top1 && slope_up {
+                GroundTileType::SlopeUpInt
+            } else if top1 && slope_down {
+                GroundTileType::SlopeDownInt
+            } else if top {
+                GroundTileType::Mid
+            } else {
+                GroundTileType::Interior
+            };
+
+            place_tile(b, i as u32, j, Tile::Ground(tile, GroundSet::Tundra))?;
+        }
+    }
+
+    let mut runs = Vec::new();
+    let mut run_start = 0;
+    let mut run_height = height_map[0];
+    for i in 0..chunk_size {
+        let this = height_map[i];
+        if this != run_height {
+            runs.push((run_start, i, run_height));
+            run_start = i;
+            run_height = this;
+        }
+    }
+
+    println!("{:?}\n runs: {:?}", height_map, runs);
+
+    for (start, end, height) in runs {
+        let length = end - start;
+        if length >= 10 && rng.gen_bool(0.2 + f64::clamp(length as f64 / 60.0, 0.0, 0.5)) {
+            let istart = rng.gen_range(start..=(end - 2)) as u32;
+            let iend = rng.gen_range(istart + 2..=istart + 4) as u32;
+            let itop = rng.gen_range(height + 3..=height + 5);
+            place_igloo(b, &mut rng, istart..iend, height + 1..itop)?;
+        }
+    }
+
     Ok(())
 }

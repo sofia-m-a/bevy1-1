@@ -1,8 +1,10 @@
+#![feature(int_abs_diff)]
+
 use benimator::{AnimationPlugin, Play};
 use bevy::prelude::*;
+use bevy_ecs_tilemap::prelude::*;
 use bevy_loading::prelude::*;
 use bevy_rapier2d::prelude::*;
-use bevy_tilemap::prelude::v0::*;
 
 mod assets;
 mod brushes;
@@ -85,7 +87,7 @@ fn keyboard_input_system(
     for mut hint in player.iter_mut() {
         if let CameraHint::Center { center } = *hint.0 {
             *hint.0 = CameraHint::Center {
-                center: center + dir * 15.0,
+                center: center + dir * 25.0,
             };
         }
     }
@@ -96,7 +98,7 @@ fn setup(
     mut rapier: ResMut<RapierConfiguration>,
     mut color: ResMut<ClearColor>,
     graphics: Res<SpriteAssets>,
-    mut materials: ResMut<Assets<ColorMaterial>>,
+    mut map_query: MapQuery,
 ) {
     commands
         .spawn_bundle(OrthographicCameraBundle::new_2d())
@@ -109,49 +111,34 @@ fn setup(
     // clear color for sky
     *color = ClearColor(SKY_COLOR);
 
-    // let mut tilemap = Tilemap::new(
-    //     graphics.tile_texture.clone(),
-    //     (SHEET_W as u32) * TILE_SIZE,
-    //     (SHEET_H as u32) * TILE_SIZE,
-    // );
-    let mut tilemap = TilemapBuilder::new()
-        .texture_atlas(graphics.tile_texture.clone())
-        .texture_dimensions(TILE_SIZE, TILE_SIZE)
-        .auto_chunk()
-        .add_layer(
-            TilemapLayer {
-                kind: LayerKind::Dense, // scenery
-            },
-            0,
-        )
-        .add_layer(
-            TilemapLayer {
-                kind: LayerKind::Sparse, // main tiles
-            },
-            1,
-        )
-        .add_layer(
-            TilemapLayer {
-                kind: LayerKind::Sparse, // special tiles
-            },
-            2,
-        )
-        .z_layers(3)
-        .finish()
-        .unwrap();
+    let map_entity = commands.spawn().id();
+    let map = Map::new(0u16, map_entity);
 
-    generate_island(&mut tilemap).unwrap();
+    let (mut layer_builder, _) = LayerBuilder::new(
+        &mut commands,
+        LayerSettings::new(
+            UVec2::new(2, 2),
+            UVec2::new(64, 64),
+            Vec2::new(TILE_SIZE as f32, TILE_SIZE as f32),
+            Vec2::new(
+                (TILE_SIZE * SHEET_W as u32) as f32,
+                (TILE_SIZE * SHEET_H as u32) as f32,
+            ),
+        ),
+        0u16,
+        0u16,
+    );
 
-    let tilemap_components = TilemapBundle {
-        tilemap,
-        visible: Visible {
-            is_visible: true,
-            is_transparent: true,
-        },
-        transform: Default::default(),
-        global_transform: Default::default(),
-    };
-    commands.spawn_bundle(tilemap_components);
+    generate_island(&mut layer_builder).unwrap();
+
+    let layer_entity =
+        map_query.build_layer(&mut commands, layer_builder, graphics.tile_material.clone());
+
+    commands
+        .entity(map_entity)
+        .insert(map)
+        .insert(Transform::from_xyz(-128.0, -128.0, 0.0))
+        .insert(GlobalTransform::default());
 }
 
 fn setup_player(mut commands: Commands, graphics: Res<SpriteAssets>) {

@@ -62,7 +62,7 @@ pub fn camera_center(
     }
 
     let mut target = Transform::from_translation((target / (n as f32)).extend(0.0));
-    target.scale /= 2.0;
+    target.scale /= 1.2;
 
     for mut cam in cam.iter_mut() {
         *cam.0 = target;
