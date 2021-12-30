@@ -2,7 +2,6 @@ use bevy::prelude::*;
 use bevy_rapier2d::prelude::*;
 use toodee::TooDeeOps;
 
-use crate::assets::Tile;
 use crate::assets::TILE_SIZE;
 use crate::brushes::*;
 use crate::grid::*;
@@ -34,7 +33,7 @@ pub fn load_chunk(
         commands
             .spawn_bundle(SpriteSheetBundle {
                 sprite: TextureAtlasSprite {
-                    index: tile.tile as u32,
+                    index: u16::from(tile.tile) as u32,
                     ..Default::default()
                 },
                 texture_atlas: graphics.clone(),
@@ -55,4 +54,3 @@ pub fn load_chunk(
         });
     }
 }
-

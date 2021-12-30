@@ -7,7 +7,6 @@ use toodee::TooDee;
 
 pub const CHUNK_SIZE: usize = 32;
 
-pub type Ordinate = i32;
 pub type Coordinate = IVec2;
 
 pub type Chunk<T> = TooDee<T>;

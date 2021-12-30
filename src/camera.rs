@@ -1,63 +1,70 @@
+use std::time::Duration;
+
 use bevy::{prelude::*, render::camera::OrthographicProjection};
+use bevy_easings::*;
 
 pub const ASPECT_X: f32 = 4.0;
 pub const ASPECT_Y: f32 = 3.0;
 
 #[derive(Clone, Copy)]
 pub enum CameraHint {
-    Show(Vec2),
-    NoShow(Vec2),
+    Attract {
+        center: Vec2,
+        radius_snap: f32,
+        radius_attract: f32,
+    },
+    Center {
+        center: Vec2,
+    },
 }
 
-pub struct CameraCenter(pub Vec2);
 pub struct CameraMarker;
 
 pub fn camera_center(
+    mut commands: Commands,
     hints: Query<&CameraHint>,
-    center: Res<CameraCenter>,
     windows: Res<Windows>,
     mut cam: Query<(&mut Transform, &mut OrthographicProjection), With<CameraMarker>>,
 ) {
-    let mut max_manhattan = f32::INFINITY;
-    let mut min_manhattan = 0.0;
-    for &h in hints.iter() {
-        match h {
-            CameraHint::Show(v) => {
-                let v = v - center.0;
-                min_manhattan = f32::max(f32::max(v.x.abs(), v.y.abs()), min_manhattan);
+    let mut center_mean = Vec2::ZERO;
+    let mut n = 0;
+
+    for &hint in hints.iter() {
+        match hint {
+            CameraHint::Center { center } => {
+                center_mean += center;
+                n += 1
             }
-            CameraHint::NoShow(v) => {
-                let v = v - center.0;
-                max_manhattan = f32::min(f32::min(v.x.abs(), v.y.abs()), max_manhattan)
+            CameraHint::Attract { .. } => (),
+        }
+    }
+
+    let center_mean = center_mean / (n as f32);
+    let mut target = center_mean;
+    let mut n = 1;
+
+    for &hint in hints.iter() {
+        match hint {
+            CameraHint::Center { .. } => (),
+            CameraHint::Attract {
+                center,
+                radius_attract,
+                radius_snap,
+            } => {
+                let distance2 = (center - center_mean).length_squared();
+                let attraction = f32::min(0.0, distance2 - radius_attract * radius_attract);
+                let snap = f32::min(0.0, distance2 - radius_snap * radius_snap);
+                let weight = attraction + snap * snap * snap;
+                target += weight * center;
+                n += 1;
             }
         }
     }
 
-    let size = f32::min(max_manhattan, min_manhattan);
+    let mut target = Transform::from_translation((target / (n as f32)).extend(0.0));
+    target.scale /= 2.0;
 
-    let window = windows.get_primary().unwrap();
-    let window_size = Vec2::new(window.width(), window.height());
-
-    let sx = window_size.x / ASPECT_X;
-    let sy = window_size.y / ASPECT_Y;
-    let scale = f32::min(sx, sy);
-
-    for (mut trans, mut proj) in cam.iter_mut() {
-        if sx >= sy {
-            let slack = window_size.x - scale * ASPECT_X;
-            proj.left = slack / 2.0;
-            proj.right = window_size.x - slack / 2.0;
-            proj.top = window_size.y;
-            proj.bottom = 0.0;
-        } else {
-            let slack = window_size.y - scale * ASPECT_Y;
-            proj.top = window_size.y - slack / 2.0;
-            proj.bottom = slack / 2.0;
-            proj.right = window_size.x;
-            proj.left = 0.0;
-        }
-
-        proj.scale = 0.7;
-        trans.translation = Vec3::new(center.0.x, center.0.y, 0.0);
+    for mut cam in cam.iter_mut() {
+        *cam.0 = target;
     }
 }
