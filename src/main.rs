@@ -1,13 +1,12 @@
 use benimator::{AnimationPlugin, Play};
 use bevy::prelude::*;
-use bevy_ecs_tilemap::prelude::*;
 use bevy_loading::prelude::*;
 use bevy_rapier2d::prelude::*;
+use bevy_tilemap::prelude::v0::*;
 
 mod assets;
 mod brushes;
 mod camera;
-mod chunk;
 mod gen;
 mod grid;
 use assets::{
@@ -15,6 +14,7 @@ use assets::{
 };
 use brushes::{GroundSet, GroundTileType};
 use camera::*;
+use gen::generate_island;
 use grid::*;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
@@ -96,7 +96,6 @@ fn setup(
     mut rapier: ResMut<RapierConfiguration>,
     mut color: ResMut<ClearColor>,
     graphics: Res<SpriteAssets>,
-    mut map_query: MapQuery,
     mut materials: ResMut<Assets<ColorMaterial>>,
 ) {
     commands
@@ -104,59 +103,55 @@ fn setup(
         .insert(CameraMarker);
 
     // physics
-    rapier.scale = TILE_SIZE;
+    rapier.scale = TILE_SIZE as f32;
     rapier.gravity = Vec2::new(0.0, -40.0).into();
 
     // clear color for sky
     *color = ClearColor(SKY_COLOR);
 
-    //let chunk = Chunk::random_chunk();
-    //chunk.load(&mut commands, &graphics.texture, Vec2::new(-8.0, -4.0));
+    // let mut tilemap = Tilemap::new(
+    //     graphics.tile_texture.clone(),
+    //     (SHEET_W as u32) * TILE_SIZE,
+    //     (SHEET_H as u32) * TILE_SIZE,
+    // );
+    let mut tilemap = TilemapBuilder::new()
+        .texture_atlas(graphics.tile_texture.clone())
+        .texture_dimensions(TILE_SIZE, TILE_SIZE)
+        .auto_chunk()
+        .add_layer(
+            TilemapLayer {
+                kind: LayerKind::Dense, // scenery
+            },
+            0,
+        )
+        .add_layer(
+            TilemapLayer {
+                kind: LayerKind::Sparse, // main tiles
+            },
+            1,
+        )
+        .add_layer(
+            TilemapLayer {
+                kind: LayerKind::Sparse, // special tiles
+            },
+            2,
+        )
+        .z_layers(3)
+        .finish()
+        .unwrap();
 
-    // Create map entity and component:
-    let map_entity = commands.spawn().id();
-    let mut map = Map::new(0u16, map_entity);
+    generate_island(&mut tilemap).unwrap();
 
-    let material_handle = materials.add(ColorMaterial::texture(graphics.tile_texture.clone()));
-
-    // Creates a new layer builder with a layer entity.
-    let (mut layer_builder, _) = LayerBuilder::new(
-        &mut commands,
-        LayerSettings::new(
-            UVec2::new(2, 2),
-            UVec2::new(32, 32),
-            Vec2::splat(TILE_SIZE),
-            Vec2::new(SHEET_W as f32 * TILE_SIZE, SHEET_H as f32 * TILE_SIZE),
-        ),
-        0u16,
-        0u16,
-    );
-
-    layer_builder.set_all(TileBundle {
-        tile: Tile {
-            texture_index: u16::from(brushes::Tile::Ground(
-                GroundTileType::LeftCave,
-                GroundSet::Cake,
-            )),
-            ..Default::default()
+    let tilemap_components = TilemapBundle {
+        tilemap,
+        visible: Visible {
+            is_visible: true,
+            is_transparent: true,
         },
-        ..Default::default()
-    });
-
-    // Builds the layer.
-    // Note: Once this is called you can no longer edit the layer until a hard sync in bevy.
-    let layer_entity = map_query.build_layer(&mut commands, layer_builder, material_handle);
-
-    // Required to keep track of layers for a map internally.
-    map.add_layer(&mut commands, 0u16, layer_entity);
-
-    // Spawn Map
-    // Required in order to use map_query to retrieve layers/tiles.
-    commands
-        .entity(map_entity)
-        .insert(map)
-        .insert(Transform::from_xyz(-128.0, -128.0, 0.0))
-        .insert(GlobalTransform::default());
+        transform: Default::default(),
+        global_transform: Default::default(),
+    };
+    commands.spawn_bundle(tilemap_components);
 }
 
 fn setup_player(mut commands: Commands, graphics: Res<SpriteAssets>) {

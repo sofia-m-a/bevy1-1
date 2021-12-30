@@ -8,7 +8,7 @@ edition = "2021"
 [dependencies]
 bevy = { version = "0.5.0", features = ["dynamic"] }
 bevy_easings = "0.4.1"
-bevy_ecs_tilemap = "0.4.0"
+bevy_tilemap = "0.4.0"
 bevy_loading = "0.1.2"
 bevy_rapier2d = { version = "0.11.0", features = [ "simd-nightly" ] }
 benimator = "0.3.1"
