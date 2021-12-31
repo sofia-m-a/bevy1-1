@@ -2,29 +2,39 @@ use bevy::reflect::erased_serde::private::serde::de::IgnoredAny;
 
 use crate::assets::{SHEET_H, SHEET_W};
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum LR {
+    Left,
+    Right,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum LMR {
+    Left,
+    Mid,
+    Right,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Slope {
+    UpRight,
+    DownLeft,
+}
+
 #[allow(dead_code)]
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum GroundTileType {
     PlainBlock,
     Block,
-    Left,
-    Mid,
-    Right,
-    LeftCave,
-    RightCave,
-    LeftVex,
-    RightVex,
+    Ground(LMR),
+    Concave(LR),
+    Convex(LR),
     Interior,
-    SlopeDown,
-    SlopeUp,
-    SlopeDownInt,
-    SlopeUpInt,
+    Slope(Slope),
+    SlopeInt(Slope),
     LedgeBlock,
-    LedgeLeft,
-    LedgeMid,
-    LedgeRight,
-    LedgeCapLeft,
-    LedgeCapRigtht,
+    Ledge(LMR),
+    LedgeCap(LR),
 }
 
 impl From<GroundTileType> for u16 {
@@ -32,24 +42,24 @@ impl From<GroundTileType> for u16 {
         match g {
             GroundTileType::PlainBlock => 1,
             GroundTileType::Block => 0,
-            GroundTileType::Left => 15,
-            GroundTileType::Mid => 16,
-            GroundTileType::Right => 17,
-            GroundTileType::LeftCave => 5,
-            GroundTileType::RightCave => 6,
-            GroundTileType::LeftVex => 3,
-            GroundTileType::RightVex => 4,
+            GroundTileType::Ground(LMR::Left) => 15,
+            GroundTileType::Ground(LMR::Mid) => 16,
+            GroundTileType::Ground(LMR::Right) => 17,
+            GroundTileType::Concave(LR::Left) => 5,
+            GroundTileType::Concave(LR::Right) => 6,
+            GroundTileType::Convex(LR::Left) => 3,
+            GroundTileType::Convex(LR::Right) => 4,
             GroundTileType::Interior => 2,
-            GroundTileType::SlopeDown => 14,
-            GroundTileType::SlopeUp => 11,
-            GroundTileType::SlopeDownInt => 13,
-            GroundTileType::SlopeUpInt => 12,
+            GroundTileType::Slope(Slope::DownLeft) => 14,
+            GroundTileType::Slope(Slope::UpRight) => 11,
+            GroundTileType::SlopeInt(Slope::DownLeft) => 13,
+            GroundTileType::SlopeInt(Slope::UpRight) => 12,
             GroundTileType::LedgeBlock => 7,
-            GroundTileType::LedgeLeft => 8,
-            GroundTileType::LedgeMid => 9,
-            GroundTileType::LedgeRight => 10,
-            GroundTileType::LedgeCapLeft => 18,
-            GroundTileType::LedgeCapRigtht => 19,
+            GroundTileType::Ledge(LMR::Left) => 8,
+            GroundTileType::Ledge(LMR::Mid) => 9,
+            GroundTileType::Ledge(LMR::Right) => 10,
+            GroundTileType::LedgeCap(LR::Left) => 18,
+            GroundTileType::LedgeCap(LR::Right) => 19,
         }
     }
 }
@@ -89,9 +99,7 @@ impl From<GroundSet> for u16 {
 #[allow(dead_code)]
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum IglooPiece {
-    TopLeft,
-    TopMid,
-    TopRight,
+    Top(LMR),
     Interior,
     InteriorAlt,
     Door,
@@ -100,9 +108,9 @@ pub enum IglooPiece {
 impl From<IglooPiece> for u16 {
     fn from(t: IglooPiece) -> u16 {
         match t {
-            IglooPiece::TopLeft => 0,
-            IglooPiece::TopMid => 1,
-            IglooPiece::TopRight => 2,
+            IglooPiece::Top(LMR::Left) => 0,
+            IglooPiece::Top(LMR::Mid) => 1,
+            IglooPiece::Top(LMR::Right) => 2,
             IglooPiece::Interior => SHEET_W,
             IglooPiece::InteriorAlt => 1 + SHEET_W,
             IglooPiece::Door => 2 + SHEET_W,

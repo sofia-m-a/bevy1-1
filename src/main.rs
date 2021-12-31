@@ -63,8 +63,10 @@ fn update_clear_colour(mut color: ResMut<ClearColor>, counter: Res<bevy_loading:
 struct Player;
 
 fn keyboard_input_system(
+    mut commands: Commands,
     mut player: Query<(&mut CameraHint, With<Player>)>,
     keyboard_input: Res<Input<KeyCode>>,
+    mut query: MapQuery,
 ) {
     let mut dir = Vec2::ZERO;
 
@@ -91,6 +93,10 @@ fn keyboard_input_system(
             };
         }
     }
+
+    if keyboard_input.just_pressed(KeyCode::D) {
+        unload_chunk(&mut commands, &mut query, 0u16);
+    }
 }
 
 fn setup(
@@ -111,34 +117,12 @@ fn setup(
     // clear color for sky
     *color = ClearColor(SKY_COLOR);
 
-    let map_entity = commands.spawn().id();
-    let map = Map::new(0u16, map_entity);
-
-    let (mut layer_builder, _) = LayerBuilder::new(
+    generate_chunk(
         &mut commands,
-        LayerSettings::new(
-            UVec2::new(2, 2),
-            UVec2::new(64, 64),
-            Vec2::new(TILE_SIZE as f32, TILE_SIZE as f32),
-            Vec2::new(
-                (TILE_SIZE * SHEET_W as u32) as f32,
-                (TILE_SIZE * SHEET_H as u32) as f32,
-            ),
-        ),
-        0u16,
+        &mut map_query,
+        graphics.tile_material.clone(),
         0u16,
     );
-
-    generate_island(&mut layer_builder).unwrap();
-
-    let layer_entity =
-        map_query.build_layer(&mut commands, layer_builder, graphics.tile_material.clone());
-
-    commands
-        .entity(map_entity)
-        .insert(map)
-        .insert(Transform::from_xyz(-128.0, -128.0, 0.0))
-        .insert(GlobalTransform::default());
 }
 
 fn setup_player(mut commands: Commands, graphics: Res<SpriteAssets>) {
