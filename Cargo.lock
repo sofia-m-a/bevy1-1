@@ -209,12 +209,12 @@ name = "bevy1-1"
 version = "0.1.0"
 dependencies = [
  "bevy",
- "bevy_ecs_tilemap",
+ "bitflags",
  "itertools",
+ "lindel",
  "noise",
  "rand 0.8.4",
  "rand_pcg",
- "toodee",
 ]
 
 [[package]]
@@ -367,19 +367,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn",
-]
-
-[[package]]
-name = "bevy_ecs_tilemap"
-version = "0.4.0"
-source = "git+https://github.com/StarArawn/bevy_ecs_tilemap?rev=a19c563f5bc44a21b20825a4f38c64c872a0eea0#a19c563f5bc44a21b20825a4f38c64c872a0eea0"
-dependencies = [
- "bevy",
- "bevy_crevice",
- "bytemuck",
- "log",
- "morton-encoding",
- "regex",
 ]
 
 [[package]]
@@ -1897,6 +1884,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "lindel"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e049ba2901c1380bbc3d9a10646d1eea9a478ec72e8de8cabb6d67e589aca99c"
+dependencies = [
+ "morton-encoding",
+ "num",
+ "num-traits",
+]
+
+[[package]]
 name = "lock_api"
 version = "0.4.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3117,12 +3115,6 @@ dependencies = [
  "indexmap",
  "serde",
 ]
-
-[[package]]
-name = "toodee"
-version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f2577f53e4e6ed12ebf809f6fda006f0456b71687abdf202d7ccf28f3db880a5"
 
 [[package]]
 name = "tracing"

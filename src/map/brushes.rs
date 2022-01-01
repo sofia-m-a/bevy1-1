@@ -118,18 +118,18 @@ impl From<IglooPiece> for u16 {
 
 #[allow(dead_code)]
 #[derive(Clone, Copy, PartialEq, Eq)]
-pub enum Tile {
+pub enum TileType {
     Ground(GroundTileType, GroundSet),
     Igloo(IglooPiece),
     Air,
 }
 
-impl From<Tile> for u16 {
-    fn from(t: Tile) -> u16 {
+impl From<TileType> for u16 {
+    fn from(t: TileType) -> u16 {
         match t {
-            Tile::Air => 0,
-            Tile::Ground(t, s) => u16::from(t) + SHEET_W * u16::from(s),
-            Tile::Igloo(piece) => 20 + SHEET_W * 14 + u16::from(piece),
+            TileType::Air => 0,
+            TileType::Ground(t, s) => u16::from(t) + SHEET_W * u16::from(s),
+            TileType::Igloo(piece) => 20 + SHEET_W * 14 + u16::from(piece),
         }
     }
 }

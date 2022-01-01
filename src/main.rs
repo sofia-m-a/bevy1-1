@@ -4,20 +4,15 @@ use bevy::{
     prelude::*,
     render::{options::WgpuOptions, render_resource::WgpuLimits},
 };
-use bevy_ecs_tilemap::prelude::*;
 
 mod assets;
-mod brushes;
 mod camera;
-mod gen;
-mod grid;
 mod map;
 use assets::{
     set_texture_filters_to_nearest, setup_sprites, SpriteAssets, SHEET_H, SHEET_W, TILE_SIZE,
 };
-use brushes::{GroundSet, GroundTileType};
 use camera::*;
-use grid::*;
+use map::map::{chunk_load_unload, Map};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
 enum GameState {
@@ -38,8 +33,7 @@ fn main() {
         .add_plugins(DefaultPlugins)
         //.add_plugin(AnimationPlugin)
         //.add_plugin(RapierPhysicsPlugin::<NoUserData>::default())
-        .add_plugin(LetterboxPlugin)
-        .add_plugin(TilemapPlugin)
+        .add_plugin(LetterboxCameraPlugin)
         .add_system_set(SystemSet::on_enter(GameState::Splash).with_system(setup_sprites))
         .add_system_set(SystemSet::on_update(GameState::Splash).with_system(update_clear_colour))
         .add_system_set(
@@ -50,7 +44,7 @@ fn main() {
         .add_system_set(
             SystemSet::on_update(GameState::Level)
                 .with_system(keyboard_input_system)
-                .with_system(camera_center),
+                .with_system(chunk_load_unload),
         )
         .add_system(set_texture_filters_to_nearest)
         .run();
@@ -68,7 +62,6 @@ fn keyboard_input_system(
     mut commands: Commands,
     mut player: Query<(&mut CameraHint, With<Player>)>,
     keyboard_input: Res<Input<KeyCode>>,
-    mut query: MapQuery,
 ) {
     let mut dir = Vec2::ZERO;
 
@@ -102,7 +95,7 @@ fn keyboard_input_system(
     }
 
     if keyboard_input.just_pressed(KeyCode::D) {
-        unload_chunk(&mut commands, &mut query, 0u16);
+        //unload_chunk(&mut commands, &mut query, 0u16);
     }
 }
 
@@ -111,12 +104,10 @@ fn setup(
     //mut rapier: ResMut<RapierConfiguration>,
     mut color: ResMut<ClearColor>,
     graphics: Res<SpriteAssets>,
-    mut map_query: MapQuery,
 ) {
-    commands
-        .spawn_bundle(OrthographicCameraBundle::new_2d())
-        .insert(CameraMarker);
+    commands.spawn_bundle(OrthographicCameraBundle::new_2d());
 
+    commands.spawn().insert(Map::new());
     // physics
     //rapier.scale = TILE_SIZE as f32;
     //rapier.gravity = Vec2::new(0.0, -40.0).into();
@@ -124,12 +115,12 @@ fn setup(
     // clear color for sky
     *color = ClearColor(SKY_COLOR);
 
-    generate_chunk(
-        &mut commands,
-        &mut map_query,
-        graphics.tile_texture.clone(),
-        0u16,
-    );
+    // generate_chunk(
+    //     &mut commands,
+    //     &mut map_query,
+    //     graphics.tile_texture.clone(),
+    //     0u16,
+    // );
 }
 
 fn setup_player(mut commands: Commands, graphics: Res<SpriteAssets>) {

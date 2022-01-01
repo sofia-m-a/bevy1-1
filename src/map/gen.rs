@@ -1,40 +1,16 @@
 use std::ops::Range;
 
-use bevy_ecs_tilemap::prelude::*;
 use noise::{NoiseFn, Seedable};
 use rand::prelude::*;
 use rand_pcg::Pcg64;
 
 use crate::{
-    brushes::{GroundSet, GroundTileType, IglooPiece, Slope, Tile, LMR, LR},
-    grid::CHUNK_SIZE,
+    map::brushes::{GroundSet, GroundTileType, IglooPiece, Slope, TileType, LMR, LR},
+    map::map::Chunk,
+    map::map::CHUNK_SIZE,
 };
 
-fn place_tile(
-    b: &mut LayerBuilder<TileBundle>,
-    i: u32,
-    j: u32,
-    tile: Tile,
-) -> Result<(), MapTileError> {
-    b.set_tile(
-        TilePos(i, j),
-        TileBundle {
-            tile: bevy_ecs_tilemap::Tile {
-                texture_index: u16::from(tile),
-                ..Default::default()
-            },
-            ..Default::default()
-        },
-    )?;
-    Ok(())
-}
-
-fn place_igloo(
-    b: &mut LayerBuilder<TileBundle>,
-    rng: &mut Pcg64,
-    width: Range<u32>,
-    height: Range<u32>,
-) -> Result<(), MapTileError> {
+fn place_igloo(c: &mut Chunk, rng: &mut Pcg64, width: Range<u32>, height: Range<u32>) {
     for i in width.clone() {
         for j in height.clone() {
             let left = i == width.clone().start;
@@ -53,27 +29,17 @@ fn place_igloo(
                     .choose(rng)
                     .unwrap()
             };
-            place_tile(b, i, j, Tile::Igloo(piece))?;
+            c[(i, j)].layers[1] = TileType::Igloo(piece).into();
         }
     }
 
     if height.len() >= 2 {
         let door_location = rng.gen_range(width);
-        place_tile(
-            b,
-            door_location,
-            height.start,
-            Tile::Igloo(IglooPiece::Door),
-        )?;
+        c[(door_location, height.start)].layers[1] = TileType::Igloo(IglooPiece::Door).into();
     }
-
-    Ok(())
 }
 
-pub fn generate_island(
-    b: &mut LayerBuilder<TileBundle>,
-    fg: &mut LayerBuilder<TileBundle>,
-) -> Result<(), MapTileError> {
+pub fn generate_island(c: &mut Chunk) {
     let mut tr = thread_rng();
     let mut rng = Pcg64::from_rng(&mut tr).unwrap();
     let noise = noise::OpenSimplex::new().set_seed(rng.next_u32());
@@ -124,7 +90,7 @@ pub fn generate_island(
                 _ => GroundTileType::Interior,
             };
 
-            place_tile(b, i as u32, j, Tile::Ground(tile, set))?;
+            c[(i as u32, j)].layers[1] = TileType::Ground(tile, set).into();
         }
     }
 
@@ -136,20 +102,12 @@ pub fn generate_island(
         let rty = type_map[(i + 1).min(CHUNK_SIZE - 1)];
         let cty = type_map[i];
         if current != left && lty == Type::Flat && cty == Type::Flat {
-            place_tile(
-                fg,
-                i as u32,
-                left,
-                Tile::Ground(GroundTileType::LedgeCap(LR::Right), set),
-            )?;
+            c[(i as u32, left)].layers[2] =
+                TileType::Ground(GroundTileType::LedgeCap(LR::Right), set).into();
         }
         if current != right && rty == Type::Flat && cty == Type::Flat {
-            place_tile(
-                fg,
-                i as u32,
-                right,
-                Tile::Ground(GroundTileType::LedgeCap(LR::Left), set),
-            )?;
+            c[(i as u32, right)].layers[2] =
+                TileType::Ground(GroundTileType::LedgeCap(LR::Left), set).into();
         }
     }
 
@@ -171,9 +129,7 @@ pub fn generate_island(
             let istart = rng.gen_range(start..=(end - 2)) as u32;
             let iend = rng.gen_range(istart + 2..=istart + 4) as u32;
             let itop = rng.gen_range(height + 1 + 2..=height + 1 + u32::min(4, iend - istart));
-            place_igloo(b, &mut rng, istart..iend, height + 1..itop)?;
+            place_igloo(c, &mut rng, istart..iend, height + 1..itop);
         }
     }
-
-    Ok(())
 }

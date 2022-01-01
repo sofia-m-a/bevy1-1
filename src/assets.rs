@@ -4,14 +4,23 @@ pub const TILE_SIZE: u32 = 70;
 pub const SHEET_W: u16 = 27;
 pub const SHEET_H: u16 = 35;
 pub struct SpriteAssets {
-    pub tile_texture: Handle<Image>,
+    pub tile_texture: Handle<TextureAtlas>,
 }
 
-pub fn setup_sprites(mut commands: Commands, assets: Res<AssetServer>) {
+pub fn setup_sprites(
+    mut commands: Commands,
+    assets: Res<AssetServer>,
+    mut atlases: ResMut<Assets<TextureAtlas>>,
+) {
     let texture_handle = assets.load("tilesheet.png");
 
     commands.insert_resource(SpriteAssets {
-        tile_texture: texture_handle,
+        tile_texture: atlases.add(TextureAtlas::from_grid(
+            texture_handle,
+            Vec2::splat(TILE_SIZE as f32),
+            SHEET_W as usize,
+            SHEET_H as usize,
+        )),
     });
 }
 

@@ -16,11 +16,11 @@ pub enum CameraHint {
 }
 
 #[derive(Component)]
-pub struct CameraMarker;
+pub struct WorldView(pub Rect<f32>);
 
 pub fn camera_center(
     hints: Query<&CameraHint>,
-    mut cam: Query<(&mut Transform, &mut OrthographicProjection), With<CameraMarker>>,
+    mut cam: Query<(&mut Transform, &mut OrthographicProjection), With<Camera>>,
 ) {
     let mut center_mean = Vec2::ZERO;
     let mut n = 0;
@@ -57,11 +57,11 @@ pub fn camera_center(
         }
     }
 
-    let mut target = Transform::from_translation((target / (n as f32)).extend(0.0));
-    target.scale /= 1.2;
+    let target = Transform::from_translation((target / (n as f32)).extend(999.9));
 
     for mut cam in cam.iter_mut() {
         *cam.0 = target;
+        dbg!(cam.0);
     }
 }
 
@@ -100,6 +100,10 @@ fn letterbox(
     >,
     mut borders: Query<(&mut Sprite, &mut Transform, &Border), Without<OrthographicProjection>>,
     aspect: Res<AspectRatio>,
+    mut views: Query<
+        (&mut Transform, &mut WorldView),
+        (Without<OrthographicProjection>, Without<Border>),
+    >,
 ) {
     if let Some((p, t)) = cameras.iter().next() {
         let z = p.far - 0.2; // Just in front of camera
@@ -135,15 +139,31 @@ fn letterbox(
                 }
             }
         }
+
+        for (mut transform, mut view) in views.iter_mut() {
+            let (sx, sy) = ((width - trim_x) / 16.0, (height - trim_y) / 12.0); // TODO aspect
+            transform.scale = Vec3::new(sx, sy, 1.0);
+            view.0 = Rect {
+                top: 100.0,
+                left: 0.0,
+                right: 100.0,
+                bottom: 0.0,
+            }; // TODO
+        }
     }
 }
 
-pub struct LetterboxPlugin;
+pub struct LetterboxCameraPlugin;
 
-impl Plugin for LetterboxPlugin {
+impl Plugin for LetterboxCameraPlugin {
     fn build(&self, app: &mut App) {
         app.add_startup_system(letterbox_init)
             .add_system_to_stage(CoreStage::PostUpdate, letterbox)
-            .insert_resource(AspectRatio(ASPECT_X / ASPECT_Y));
+            .add_system_to_stage(CoreStage::PostUpdate, camera_center)
+            .insert_resource(AspectRatio(ASPECT_X / ASPECT_Y))
+            .world
+            .spawn()
+            .insert(WorldView(Rect::default()))
+            .insert(Transform::identity());
     }
 }
