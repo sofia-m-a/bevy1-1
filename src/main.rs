@@ -1,22 +1,22 @@
 #![feature(int_abs_diff)]
 
-use benimator::{AnimationPlugin, Play};
-use bevy::prelude::*;
+use bevy::{
+    prelude::*,
+    render::{options::WgpuOptions, render_resource::WgpuLimits},
+};
 use bevy_ecs_tilemap::prelude::*;
-use bevy_loading::prelude::*;
-use bevy_rapier2d::prelude::*;
 
 mod assets;
 mod brushes;
 mod camera;
 mod gen;
 mod grid;
+mod map;
 use assets::{
     set_texture_filters_to_nearest, setup_sprites, SpriteAssets, SHEET_H, SHEET_W, TILE_SIZE,
 };
 use brushes::{GroundSet, GroundTileType};
 use camera::*;
-use gen::generate_island;
 use grid::*;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
@@ -26,40 +26,42 @@ enum GameState {
 }
 
 fn main() {
-    App::build()
+    App::new()
+        .insert_resource(WgpuOptions {
+            limits: WgpuLimits {
+                max_texture_array_layers: 2048,
+                ..Default::default()
+            },
+            ..Default::default()
+        })
         .add_state(GameState::Splash)
         .add_plugins(DefaultPlugins)
-        //.add_system(keyboard_input_system.system())
-        .add_plugin(AnimationPlugin)
-        .add_plugin(RapierPhysicsPlugin::<NoUserData>::default())
-        .add_plugin(LoadingPlugin {
-            loading_state: GameState::Splash,
-            next_state: GameState::Level,
-        })
+        //.add_plugin(AnimationPlugin)
+        //.add_plugin(RapierPhysicsPlugin::<NoUserData>::default())
+        .add_plugin(LetterboxPlugin)
         .add_plugin(TilemapPlugin)
-        .add_system_set(SystemSet::on_enter(GameState::Splash).with_system(setup_sprites.system()))
-        .add_system_set(
-            SystemSet::on_update(GameState::Splash).with_system(update_clear_colour.system()),
-        )
+        .add_system_set(SystemSet::on_enter(GameState::Splash).with_system(setup_sprites))
+        .add_system_set(SystemSet::on_update(GameState::Splash).with_system(update_clear_colour))
         .add_system_set(
             SystemSet::on_enter(GameState::Level)
-                .with_system(setup.system())
-                .with_system(setup_player.system()),
+                .with_system(setup)
+                .with_system(setup_player),
         )
         .add_system_set(
             SystemSet::on_update(GameState::Level)
-                .with_system(keyboard_input_system.system())
-                .with_system(camera_center.system()),
+                .with_system(keyboard_input_system)
+                .with_system(camera_center),
         )
-        .add_system(set_texture_filters_to_nearest.system())
+        .add_system(set_texture_filters_to_nearest)
         .run();
 }
 const SKY_COLOR: Color = Color::rgb_linear(0.2, 0.6, 1.0);
 
-fn update_clear_colour(mut color: ResMut<ClearColor>, counter: Res<bevy_loading::ProgressCounter>) {
-    *color = ClearColor(SKY_COLOR * f32::from(counter.progress()));
+fn update_clear_colour(mut app_state: ResMut<State<GameState>>) {
+    app_state.set(GameState::Level).unwrap()
 }
 
+#[derive(Component)]
 struct Player;
 
 fn keyboard_input_system(
@@ -88,8 +90,13 @@ fn keyboard_input_system(
 
     for mut hint in player.iter_mut() {
         if let CameraHint::Center { center } = *hint.0 {
+            let speed = if keyboard_input.pressed(KeyCode::LShift) {
+                50.0
+            } else {
+                15.0
+            };
             *hint.0 = CameraHint::Center {
-                center: center + dir * 25.0,
+                center: center + dir * speed,
             };
         }
     }
@@ -101,7 +108,7 @@ fn keyboard_input_system(
 
 fn setup(
     mut commands: Commands,
-    mut rapier: ResMut<RapierConfiguration>,
+    //mut rapier: ResMut<RapierConfiguration>,
     mut color: ResMut<ClearColor>,
     graphics: Res<SpriteAssets>,
     mut map_query: MapQuery,
@@ -111,8 +118,8 @@ fn setup(
         .insert(CameraMarker);
 
     // physics
-    rapier.scale = TILE_SIZE as f32;
-    rapier.gravity = Vec2::new(0.0, -40.0).into();
+    //rapier.scale = TILE_SIZE as f32;
+    //rapier.gravity = Vec2::new(0.0, -40.0).into();
 
     // clear color for sky
     *color = ClearColor(SKY_COLOR);
@@ -120,7 +127,7 @@ fn setup(
     generate_chunk(
         &mut commands,
         &mut map_query,
-        graphics.tile_material.clone(),
+        graphics.tile_texture.clone(),
         0u16,
     );
 }

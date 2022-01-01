@@ -34,7 +34,6 @@
             pkgconfig
             udev
             alsaLib
-            # lutris
             x11
             xorg.libXcursor
             xorg.libXrandr

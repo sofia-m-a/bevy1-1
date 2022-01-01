@@ -1,5 +1,3 @@
-use bevy::reflect::erased_serde::private::serde::de::IgnoredAny;
-
 use crate::assets::{SHEET_H, SHEET_W};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -135,3 +133,45 @@ impl From<Tile> for u16 {
         }
     }
 }
+
+// pub trait Brush {
+//     type SampleSpace;
+// }
+
+// #[derive(Clone, Copy, PartialEq, Eq)]
+// pub enum Axis {
+//     Hor,
+//     Ver,
+// }
+
+// #[derive(Clone, Copy, PartialEq, Eq)]
+// pub struct XRange {
+//     pub axis: Axis,
+//     pub start: i32,
+//     pub end: i32,
+// }
+
+// impl Brush for XRange {
+//     type SampleSpace = i32;
+// }
+
+// #[derive(Clone, Copy, PartialEq, Eq)]
+// pub struct Product<A, B>(pub A, pub B);
+
+// impl<A: Brush, B: Brush> Brush for Product<A, B> {
+//     type SampleSpace = (A::SampleSpace, B::SampleSpace);
+// }
+
+// #[derive(Clone, Copy, PartialEq, Eq)]
+// pub struct Union<A>(pub A, pub A);
+
+// impl<A: Brush> Brush for Union<A> {
+//     type SampleSpace = A::SampleSpace;
+// }
+
+// #[derive(Clone, Copy, PartialEq, Eq)]
+// pub struct Intersection<A>(pub A);
+
+// impl<A: Brush> Brush for Intersection<A> {
+//     type SampleSpace = A::SampleSpace;
+// }

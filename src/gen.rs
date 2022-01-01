@@ -1,13 +1,11 @@
 use std::ops::Range;
 
-use bevy::prelude::*;
-use bevy_ecs_tilemap::{LayerBuilder, MapTileError, TileBundle};
-use noise::{NoiseFn, Perlin, Seedable};
+use bevy_ecs_tilemap::prelude::*;
+use noise::{NoiseFn, Seedable};
 use rand::prelude::*;
 use rand_pcg::Pcg64;
 
 use crate::{
-    assets::SpriteAssets,
     brushes::{GroundSet, GroundTileType, IglooPiece, Slope, Tile, LMR, LR},
     grid::CHUNK_SIZE,
 };
@@ -19,7 +17,7 @@ fn place_tile(
     tile: Tile,
 ) -> Result<(), MapTileError> {
     b.set_tile(
-        UVec2::new(i, j),
+        TilePos(i, j),
         TileBundle {
             tile: bevy_ecs_tilemap::Tile {
                 texture_index: u16::from(tile),
@@ -85,7 +83,7 @@ pub fn generate_island(
     let mut height_map = [0; CHUNK_SIZE];
 
     for i in 0..CHUNK_SIZE {
-        let height = (12.0 * noise.get([(i as f64) * 0.04, i as f64 * 0.04]).abs()) as u32;
+        let height = (12.0 * noise.get([(i as f64) * 0.06, i as f64 * 0.06]).abs()) as u32;
         height_map[i] = height;
     }
 
