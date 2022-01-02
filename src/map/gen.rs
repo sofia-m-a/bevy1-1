@@ -44,7 +44,21 @@ pub fn generate_island(c: &mut Chunk) {
     let mut rng = Pcg64::from_rng(&mut tr).unwrap();
     let noise = noise::OpenSimplex::new().set_seed(rng.next_u32());
 
-    let set = GroundSet::Tundra;
+    let set = *[
+        GroundSet::Grass,
+        GroundSet::Dirt,
+        GroundSet::Sand,
+        GroundSet::Stone,
+        GroundSet::Castle,
+        GroundSet::Metal,
+        GroundSet::Stone,
+        GroundSet::Snow,
+        GroundSet::Tundra,
+        GroundSet::Cake,
+        GroundSet::Choco,
+    ]
+    .choose(&mut rng)
+    .unwrap();
 
     let mut height_map = [0; CHUNK_SIZE];
 

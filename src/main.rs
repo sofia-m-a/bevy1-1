@@ -60,7 +60,7 @@ struct Player;
 
 fn keyboard_input_system(
     mut commands: Commands,
-    mut player: Query<(&mut CameraHint, With<Player>)>,
+    mut player: Query<(&mut CameraCenter, With<Player>)>,
     keyboard_input: Res<Input<KeyCode>>,
 ) {
     let mut dir = Vec2::ZERO;
@@ -82,20 +82,13 @@ fn keyboard_input_system(
     }
 
     for mut hint in player.iter_mut() {
-        if let CameraHint::Center { center } = *hint.0 {
-            let speed = if keyboard_input.pressed(KeyCode::LShift) {
-                50.0
-            } else {
-                15.0
-            };
-            *hint.0 = CameraHint::Center {
-                center: center + dir * speed,
-            };
-        }
-    }
-
-    if keyboard_input.just_pressed(KeyCode::D) {
-        //unload_chunk(&mut commands, &mut query, 0u16);
+        let center = hint.0.center;
+        let speed = if keyboard_input.pressed(KeyCode::LShift) {
+            50.0
+        } else {
+            15.0
+        };
+        hint.0.center = center + dir * speed;
     }
 }
 
@@ -105,9 +98,19 @@ fn setup(
     mut color: ResMut<ClearColor>,
     graphics: Res<SpriteAssets>,
 ) {
-    commands.spawn_bundle(OrthographicCameraBundle::new_2d());
+    commands
+        .spawn_bundle(OrthographicCameraBundle::new_2d())
+        .insert(SofiaCamera {
+            view: Rect::default(),
+            aspect_ratio: ASPECT_X / ASPECT_Y,
+        });
 
-    commands.spawn().insert(Map::new());
+    commands
+        .spawn()
+        .insert(Map::new())
+        .insert(Transform::from_scale(
+            Vec2::splat(TILE_SIZE as f32).extend(1.0),
+        ));
     // physics
     //rapier.scale = TILE_SIZE as f32;
     //rapier.gravity = Vec2::new(0.0, -40.0).into();
@@ -158,6 +161,6 @@ fn setup_player(mut commands: Commands, graphics: Res<SpriteAssets>) {
 
     commands
         .spawn()
-        .insert(CameraHint::Center { center: Vec2::ZERO })
+        .insert(CameraCenter { center: Vec2::ZERO })
         .insert(Player);
 }

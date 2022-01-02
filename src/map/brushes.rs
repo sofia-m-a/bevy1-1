@@ -1,4 +1,4 @@
-use crate::assets::{SHEET_H, SHEET_W};
+use crate::assets::SHEET_W;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum LR {
@@ -6,11 +6,30 @@ pub enum LR {
     Right,
 }
 
+impl From<LR> for u16 {
+    fn from(lr: LR) -> u16 {
+        match lr {
+            LR::Left => 0,
+            LR::Right => 1,
+        }
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum LMR {
     Left,
     Mid,
     Right,
+}
+
+impl From<LMR> for u16 {
+    fn from(lr: LMR) -> u16 {
+        match lr {
+            LMR::Left => 0,
+            LMR::Mid => 1,
+            LMR::Right => 2,
+        }
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -40,24 +59,17 @@ impl From<GroundTileType> for u16 {
         match g {
             GroundTileType::PlainBlock => 1,
             GroundTileType::Block => 0,
-            GroundTileType::Ground(LMR::Left) => 15,
-            GroundTileType::Ground(LMR::Mid) => 16,
-            GroundTileType::Ground(LMR::Right) => 17,
-            GroundTileType::Concave(LR::Left) => 5,
-            GroundTileType::Concave(LR::Right) => 6,
-            GroundTileType::Convex(LR::Left) => 3,
-            GroundTileType::Convex(LR::Right) => 4,
+            GroundTileType::Ground(lmr) => 15 + u16::from(lmr),
+            GroundTileType::Concave(lr) => 5 + u16::from(lr),
+            GroundTileType::Convex(lr) => 3 + u16::from(lr),
             GroundTileType::Interior => 2,
             GroundTileType::Slope(Slope::DownLeft) => 14,
             GroundTileType::Slope(Slope::UpRight) => 11,
             GroundTileType::SlopeInt(Slope::DownLeft) => 13,
             GroundTileType::SlopeInt(Slope::UpRight) => 12,
             GroundTileType::LedgeBlock => 7,
-            GroundTileType::Ledge(LMR::Left) => 8,
-            GroundTileType::Ledge(LMR::Mid) => 9,
-            GroundTileType::Ledge(LMR::Right) => 10,
-            GroundTileType::LedgeCap(LR::Left) => 18,
-            GroundTileType::LedgeCap(LR::Right) => 19,
+            GroundTileType::Ledge(lmr) => 8 + u16::from(lmr),
+            GroundTileType::LedgeCap(lr) => 18 + u16::from(lr),
         }
     }
 }
@@ -102,13 +114,10 @@ pub enum IglooPiece {
     InteriorAlt,
     Door,
 }
-
 impl From<IglooPiece> for u16 {
     fn from(t: IglooPiece) -> u16 {
         match t {
-            IglooPiece::Top(LMR::Left) => 0,
-            IglooPiece::Top(LMR::Mid) => 1,
-            IglooPiece::Top(LMR::Right) => 2,
+            IglooPiece::Top(lmr) => u16::from(lmr),
             IglooPiece::Interior => SHEET_W,
             IglooPiece::InteriorAlt => 1 + SHEET_W,
             IglooPiece::Door => 2 + SHEET_W,
@@ -118,9 +127,61 @@ impl From<IglooPiece> for u16 {
 
 #[allow(dead_code)]
 #[derive(Clone, Copy, PartialEq, Eq)]
+pub enum TreePiece {
+    Top { snow: bool },
+    PineBranch { snow: bool, lr: LR, double: bool },
+    PineTrunk,
+}
+
+impl From<TreePiece> for u16 {
+    fn from(t: TreePiece) -> u16 {
+        match t {
+            TreePiece::Top { snow } => SHEET_W * u16::from(snow),
+            TreePiece::PineBranch { snow, lr, double } => {
+                u16::from(lr) + 2 * u16::from(snow) + SHEET_W * u16::from(double)
+            }
+            TreePiece::PineTrunk => 5 + SHEET_W,
+        }
+    }
+}
+
+#[allow(dead_code)]
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum TreeTrunkPiece {
+    Straight,
+    Fork(LR),
+    DeadFork,
+    KnotBranch(LR),
+    Branch(LMR),
+    Base,
+    BaseNarrow,
+    BaseSnow,
+    BaseSnowPile,
+}
+
+impl From<TreeTrunkPiece> for u16 {
+    fn from(t: TreeTrunkPiece) -> u16 {
+        match t {
+            TreeTrunkPiece::Straight => 0,
+            TreeTrunkPiece::Fork(lr) => 1 + u16::from(lr),
+            TreeTrunkPiece::DeadFork => 3,
+            TreeTrunkPiece::KnotBranch(lr) => 4 + 2 * u16::from(lr),
+            TreeTrunkPiece::Branch(lmr) => 4 + SHEET_W + u16::from(lmr),
+            TreeTrunkPiece::Base => SHEET_W,
+            TreeTrunkPiece::BaseNarrow => 1 + SHEET_W,
+            TreeTrunkPiece::BaseSnow => 2 + SHEET_W,
+            TreeTrunkPiece::BaseSnowPile => 3 + SHEET_W,
+        }
+    }
+}
+
+#[allow(dead_code)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub enum TileType {
     Ground(GroundTileType, GroundSet),
     Igloo(IglooPiece),
+    Tree(TreePiece),
+    Trunk(TreeTrunkPiece),
     Air,
 }
 
@@ -130,6 +191,8 @@ impl From<TileType> for u16 {
             TileType::Air => 0,
             TileType::Ground(t, s) => u16::from(t) + SHEET_W * u16::from(s),
             TileType::Igloo(piece) => 20 + SHEET_W * 14 + u16::from(piece),
+            TileType::Tree(piece) => 20 + SHEET_W * 11 + u16::from(piece),
+            TileType::Trunk(piece) => 16 + SHEET_W * 8 + u16::from(piece),
         }
     }
 }

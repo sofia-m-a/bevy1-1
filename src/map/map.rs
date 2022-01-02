@@ -5,13 +5,13 @@ use std::{
 };
 
 use bevy::{
-    math::{IVec2, Rect, Vec2, Vec3},
+    math::{IVec2, Rect, Vec3},
     prelude::*,
 };
 
 use crate::{
     assets::{SpriteAssets, TILE_SIZE},
-    camera::WorldView,
+    camera::SofiaCamera,
 };
 
 use super::{brushes::TileType, gen::generate_island};
@@ -43,7 +43,7 @@ impl Map {
             .collect()
     }
 
-    pub fn get_changes(&self, r: Rect<f32>) -> (HashSet<IVec2>, HashSet<IVec2>) {
+    fn get_changes(&self, r: Rect<f32>) -> (HashSet<IVec2>, HashSet<IVec2>) {
         let c: HashSet<IVec2> = HashSet::from_iter(Self::intersect(r).iter().copied());
         let d: HashSet<IVec2> = HashSet::from_iter(self.chunks.keys().copied());
 
@@ -54,7 +54,7 @@ impl Map {
 }
 
 pub struct Chunk {
-    pub grid: [Tile; CHUNK_SIZE * CHUNK_SIZE],
+    pub grid: Vec<Tile>,
 }
 
 impl Index<(u32, u32)> for Chunk {
@@ -114,7 +114,7 @@ impl From<TileType> for TileDesc {
     }
 }
 
-fn render(c: &mut Chunk, commands: &mut Commands, sa: &Res<SpriteAssets>, coord: IVec2) {
+fn load(c: &mut Chunk, commands: &mut Commands, sa: &Res<SpriteAssets>, coord: IVec2) {
     for (i, tile) in c.grid.iter_mut().enumerate() {
         for (index, layer) in tile.layers.iter_mut().enumerate() {
             if layer.tile == TileType::Air {
@@ -159,18 +159,17 @@ pub fn chunk_load_unload(
     mut commands: Commands,
     mut maps: Query<&mut Map>,
     sa: Res<SpriteAssets>,
-    views: Query<&WorldView>,
+    views: Query<&SofiaCamera>,
 ) {
     if let Some(view) = views.iter().next() {
         for mut map in maps.iter_mut() {
-            let (must_make, must_delete) = map.get_changes(view.0);
-            println!("{:?} {:?}", must_make, must_delete);
+            let (must_make, must_delete) = map.get_changes(view.view);
             for coord in must_make.iter() {
                 let mut chunk = Chunk {
-                    grid: [Tile::default(); CHUNK_SIZE * CHUNK_SIZE], //TODO: stack overflow for large chunk sizes
+                    grid: vec![Tile::default(); CHUNK_SIZE * CHUNK_SIZE],
                 };
                 generate_island(&mut chunk);
-                render(&mut chunk, &mut commands, &sa, *coord * (CHUNK_SIZE as i32));
+                load(&mut chunk, &mut commands, &sa, *coord * (CHUNK_SIZE as i32));
                 map.chunks.insert(*coord, chunk);
             }
 
