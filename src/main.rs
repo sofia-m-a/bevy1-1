@@ -1,4 +1,5 @@
 #![feature(int_abs_diff)]
+#![feature(bool_to_option)]
 
 use bevy::{
     prelude::*,

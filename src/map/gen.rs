@@ -1,69 +1,33 @@
-use std::ops::Range;
-
+use extent::Extent;
 use noise::{NoiseFn, Seedable};
 use rand::prelude::*;
 use rand_pcg::Pcg64;
 
-use crate::{
-    map::brushes::{GroundSet, GroundTileType, IglooPiece, Slope, TileType, LMR, LR},
-    map::map::Chunk,
-    map::map::CHUNK_SIZE,
-};
+use crate::{map::brushes::*, map::map::Chunk, map::map::CHUNK_SIZE};
 
-fn place_igloo(c: &mut Chunk, rng: &mut Pcg64, width: Range<u32>, height: Range<u32>) {
-    for i in width.clone() {
-        for j in height.clone() {
-            let left = i == width.clone().start;
-            let right = i == width.clone().end - 1;
-            let top = j == height.clone().end - 1;
-            let piece = if top {
-                IglooPiece::Top(if left {
-                    LMR::Left
-                } else if right {
-                    LMR::Right
-                } else {
-                    LMR::Mid
-                })
-            } else {
-                *[IglooPiece::Interior, IglooPiece::InteriorAlt]
-                    .choose(rng)
-                    .unwrap()
-            };
-            c[(i, j)].layers[1] = TileType::Igloo(piece).into();
-        }
-    }
-
-    if height.len() >= 2 {
-        let door_location = rng.gen_range(width);
-        c[(door_location, height.start)].layers[1] = TileType::Igloo(IglooPiece::Door).into();
-    }
-}
-
-pub fn generate_island(c: &mut Chunk) {
-    let mut tr = thread_rng();
-    let mut rng = Pcg64::from_rng(&mut tr).unwrap();
+pub fn generate_island(c: &mut Chunk, rng: &mut Pcg64) {
     let noise = noise::OpenSimplex::new().set_seed(rng.next_u32());
 
     let set = *[
-        GroundSet::Grass,
-        GroundSet::Dirt,
-        GroundSet::Sand,
-        GroundSet::Stone,
-        GroundSet::Castle,
-        GroundSet::Metal,
-        GroundSet::Stone,
-        GroundSet::Snow,
-        GroundSet::Tundra,
-        GroundSet::Cake,
-        GroundSet::Choco,
+        TerrainTheme::Grass,
+        TerrainTheme::Dirt,
+        TerrainTheme::Sand,
+        TerrainTheme::Stone,
+        TerrainTheme::Castle,
+        TerrainTheme::Metal,
+        TerrainTheme::Stone,
+        TerrainTheme::Snow,
+        TerrainTheme::Tundra,
+        TerrainTheme::Cake,
+        TerrainTheme::Choco,
     ]
-    .choose(&mut rng)
+    .choose(rng)
     .unwrap();
 
     let mut height_map = [0; CHUNK_SIZE];
 
     for i in 0..CHUNK_SIZE {
-        let height = (12.0 * noise.get([(i as f64) * 0.06, i as f64 * 0.06]).abs()) as u32;
+        let height = (12.0 * noise.get([(i as f64) * 0.04, i as f64 * 0.04]).abs()) as u32;
         height_map[i] = height;
     }
 
@@ -98,13 +62,13 @@ pub fn generate_island(c: &mut Chunk) {
             let top1 = current != 0 && j == (current - 1);
 
             let tile = match type_map[i] {
-                Type::Slope(s) if top => GroundTileType::Slope(s),
-                Type::Slope(s) if top1 => GroundTileType::SlopeInt(s),
-                Type::Flat if top => GroundTileType::Ground(LMR::Mid),
-                _ => GroundTileType::Interior,
+                Type::Slope(s) if top => Terrain::Slope(s),
+                Type::Slope(s) if top1 => Terrain::SlopeInt(s),
+                Type::Flat if top => Terrain::Ground(LMR::M),
+                _ => Terrain::Interior,
             };
 
-            c[(i as u32, j)].layers[1] = TileType::Ground(tile, set).into();
+            c[(i as u32, j)].layers[1] = Tile::Ground(tile, set).into();
         }
     }
 
@@ -116,12 +80,10 @@ pub fn generate_island(c: &mut Chunk) {
         let rty = type_map[(i + 1).min(CHUNK_SIZE - 1)];
         let cty = type_map[i];
         if current != left && lty == Type::Flat && cty == Type::Flat {
-            c[(i as u32, left)].layers[2] =
-                TileType::Ground(GroundTileType::LedgeCap(LR::Right), set).into();
+            c[(i as u32, left)].layers[2] = Tile::Ground(Terrain::LedgeCap(LR::R), set).into();
         }
         if current != right && rty == Type::Flat && cty == Type::Flat {
-            c[(i as u32, right)].layers[2] =
-                TileType::Ground(GroundTileType::LedgeCap(LR::Left), set).into();
+            c[(i as u32, right)].layers[2] = Tile::Ground(Terrain::LedgeCap(LR::L), set).into();
         }
     }
 
@@ -140,10 +102,8 @@ pub fn generate_island(c: &mut Chunk) {
     for (start, end, height) in runs {
         let length = end - start;
         if length >= 10 && rng.gen_bool(0.2 + f64::clamp(length as f64 / 60.0, 0.0, 0.5)) {
-            let istart = rng.gen_range(start..=(end - 2)) as u32;
-            let iend = rng.gen_range(istart + 2..=istart + 4) as u32;
-            let itop = rng.gen_range(height + 1 + 2..=height + 1 + u32::min(4, iend - istart));
-            place_igloo(c, &mut rng, istart..iend, height + 1..itop);
+            let plan = igloo((3, 3), rng);
+            run_plan(plan, c, rng, (start as u32, height + 1), 1);
         }
     }
 }

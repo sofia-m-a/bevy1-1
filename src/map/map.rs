@@ -1,4 +1,6 @@
 use lindel::{morton_decode, morton_encode};
+use rand::{thread_rng, SeedableRng};
+use rand_pcg::Pcg64;
 use std::{
     collections::{HashMap, HashSet},
     ops::{Index, IndexMut},
@@ -14,7 +16,7 @@ use crate::{
     camera::SofiaCamera,
 };
 
-use super::{brushes::TileType, gen::generate_island};
+use super::{brushes::Tile, gen::generate_island};
 
 pub const CHUNK_SIZE: usize = 32;
 
@@ -23,12 +25,16 @@ pub type Coordinate = IVec2;
 #[derive(Component)]
 pub struct Map {
     pub chunks: HashMap<Coordinate, Chunk>,
+    pub rng: Pcg64,
 }
 
 impl Map {
     pub fn new() -> Self {
+        let mut tr = thread_rng();
+        let rng = Pcg64::from_rng(&mut tr).unwrap();
         Map {
             chunks: HashMap::new(),
+            rng,
         }
     }
 
@@ -54,31 +60,31 @@ impl Map {
 }
 
 pub struct Chunk {
-    pub grid: Vec<Tile>,
+    pub grid: Vec<Slot>,
 }
 
 impl Index<(u32, u32)> for Chunk {
-    type Output = Tile;
-    fn index(&self, s: (u32, u32)) -> &Tile {
+    type Output = Slot;
+    fn index(&self, s: (u32, u32)) -> &Slot {
         &self.grid[morton_encode([s.0, s.1]) as usize]
     }
 }
 
 impl IndexMut<(u32, u32)> for Chunk {
-    fn index_mut(&mut self, s: (u32, u32)) -> &mut Tile {
+    fn index_mut(&mut self, s: (u32, u32)) -> &mut Slot {
         &mut self.grid[morton_encode([s.0, s.1]) as usize]
     }
 }
 
 #[derive(Clone, Copy, PartialEq)]
-pub struct Tile {
-    pub layers: [TileDesc; 3],
+pub struct Slot {
+    pub layers: [ActiveTile; 3],
 }
 
-impl Default for Tile {
+impl Default for Slot {
     fn default() -> Self {
-        let s = TileDesc {
-            tile: TileType::Air,
+        let s = ActiveTile {
+            tile: Tile::Air,
             flip: Flip::empty(),
             tint: Color::WHITE,
             entity: None,
@@ -88,8 +94,8 @@ impl Default for Tile {
 }
 
 #[derive(Clone, Copy, PartialEq, Component)]
-pub struct TileDesc {
-    pub tile: TileType,
+pub struct ActiveTile {
+    pub tile: Tile,
     pub flip: Flip,
     pub tint: Color,
     pub entity: Option<Entity>,
@@ -103,8 +109,8 @@ bitflags::bitflags! {
     }
 }
 
-impl From<TileType> for TileDesc {
-    fn from(t: TileType) -> Self {
+impl From<Tile> for ActiveTile {
+    fn from(t: Tile) -> Self {
         Self {
             tile: t,
             flip: Flip::empty(),
@@ -114,10 +120,16 @@ impl From<TileType> for TileDesc {
     }
 }
 
-fn load(c: &mut Chunk, commands: &mut Commands, sa: &Res<SpriteAssets>, coord: IVec2) {
+fn load(
+    c: &mut Chunk,
+    commands: &mut Commands,
+    sa: &Res<SpriteAssets>,
+    coord: IVec2,
+    parent: Entity,
+) {
     for (i, tile) in c.grid.iter_mut().enumerate() {
         for (index, layer) in tile.layers.iter_mut().enumerate() {
-            if layer.tile == TileType::Air {
+            if layer.tile == Tile::Air {
                 continue;
             }
             let entity = layer
@@ -126,21 +138,24 @@ fn load(c: &mut Chunk, commands: &mut Commands, sa: &Res<SpriteAssets>, coord: I
 
             let [a, b]: [u32; 2] = morton_decode(i as u64);
 
-            commands.entity(entity).insert_bundle(SpriteSheetBundle {
-                sprite: TextureAtlasSprite {
-                    color: layer.tint,
-                    index: u16::from(layer.tile) as usize,
-                    flip_x: layer.flip.contains(Flip::FLIP_H),
-                    flip_y: layer.flip.contains(Flip::FLIP_V),
-                },
-                texture_atlas: sa.tile_texture.clone(),
-                transform: Transform::from_translation(Vec3::new(
-                    (a + coord.x as u32) as f32 * (TILE_SIZE as f32),
-                    (b + coord.y as u32) as f32 * (TILE_SIZE as f32),
-                    index as f32,
-                )),
-                ..Default::default()
-            });
+            commands
+                .entity(entity)
+                //.insert(Parent(parent))
+                .insert_bundle(SpriteSheetBundle {
+                    sprite: TextureAtlasSprite {
+                        color: layer.tint,
+                        index: u16::from(layer.tile) as usize,
+                        flip_x: layer.flip.contains(Flip::FLIP_H),
+                        flip_y: layer.flip.contains(Flip::FLIP_V),
+                    },
+                    texture_atlas: sa.tile_texture.clone(),
+                    transform: Transform::from_translation(Vec3::new(
+                        (a + coord.x as u32) as f32 * (TILE_SIZE as f32),
+                        (b + coord.y as u32) as f32 * (TILE_SIZE as f32),
+                        index as f32,
+                    )),
+                    ..Default::default()
+                });
         }
     }
 }
@@ -149,7 +164,10 @@ fn unload(c: &mut Chunk, commands: &mut Commands) {
     for tile in c.grid.iter_mut() {
         for l in tile.layers.iter_mut() {
             if let Some(t) = l.entity {
-                commands.entity(t).remove_bundle::<SpriteSheetBundle>();
+                commands
+                    .entity(t)
+                    .remove_bundle::<SpriteSheetBundle>()
+                    .remove::<Parent>();
             }
         }
     }
@@ -157,19 +175,25 @@ fn unload(c: &mut Chunk, commands: &mut Commands) {
 
 pub fn chunk_load_unload(
     mut commands: Commands,
-    mut maps: Query<&mut Map>,
+    mut maps: Query<(Entity, &mut Map)>,
     sa: Res<SpriteAssets>,
     views: Query<&SofiaCamera>,
 ) {
     if let Some(view) = views.iter().next() {
-        for mut map in maps.iter_mut() {
+        for (entity, mut map) in maps.iter_mut() {
             let (must_make, must_delete) = map.get_changes(view.view);
             for coord in must_make.iter() {
                 let mut chunk = Chunk {
-                    grid: vec![Tile::default(); CHUNK_SIZE * CHUNK_SIZE],
+                    grid: vec![Slot::default(); CHUNK_SIZE * CHUNK_SIZE],
                 };
-                generate_island(&mut chunk);
-                load(&mut chunk, &mut commands, &sa, *coord * (CHUNK_SIZE as i32));
+                generate_island(&mut chunk, &mut map.rng);
+                load(
+                    &mut chunk,
+                    &mut commands,
+                    &sa,
+                    *coord * (CHUNK_SIZE as i32),
+                    entity,
+                );
                 map.chunks.insert(*coord, chunk);
             }
 

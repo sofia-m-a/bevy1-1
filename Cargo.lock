@@ -210,9 +210,11 @@ version = "0.1.0"
 dependencies = [
  "bevy",
  "bitflags",
+ "extent",
  "itertools",
  "lindel",
  "noise",
+ "num-traits",
  "rand 0.8.4",
  "rand_pcg",
 ]
@@ -1321,6 +1323,15 @@ name = "event-listener"
 version = "2.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f7531096570974c3a9dcf9e4b8e1cede1ec26cf5046219fb3b9d897503b9be59"
+
+[[package]]
+name = "extent"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2a9df87e14d0f4cafaa4e3983a48a058046ab215a09f07a9088a60c393ad477c"
+dependencies = [
+ "num-traits",
+]
 
 [[package]]
 name = "fastrand"
