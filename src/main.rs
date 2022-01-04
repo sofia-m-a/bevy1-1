@@ -13,7 +13,7 @@ use assets::{
     set_texture_filters_to_nearest, setup_sprites, SpriteAssets, SHEET_H, SHEET_W, TILE_SIZE,
 };
 use camera::*;
-use map::map::{chunk_load_unload, Map};
+use map::{chunk_load_unload, Map};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
 enum GameState {
@@ -45,6 +45,7 @@ fn main() {
         .add_system_set(
             SystemSet::on_update(GameState::Level)
                 .with_system(keyboard_input_system)
+                .before("camera_center")
                 .with_system(chunk_load_unload),
         )
         .add_system(set_texture_filters_to_nearest)

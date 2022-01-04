@@ -99,7 +99,6 @@ fn letterbox(
             (0.0, 0.0)
         };
         let t = t.translation;
-        (trim_x, trim_y, t, width, height, z);
 
         for (mut sprite, mut transform, border) in borders.iter_mut() {
             match *border {
