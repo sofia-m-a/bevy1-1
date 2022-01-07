@@ -13,11 +13,7 @@ use assets::{
     set_texture_filters_to_nearest, setup_sprites, SpriteAssets, SHEET_H, SHEET_W, TILE_SIZE,
 };
 use camera::*;
-use map::{
-    chunk_load_unload,
-    map::{chunk_system, MapView},
-    Map,
-};
+use map::{chunk_load_unload, Map};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
 enum GameState {

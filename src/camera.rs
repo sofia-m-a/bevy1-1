@@ -135,7 +135,7 @@ pub struct LetterboxCameraPlugin;
 impl Plugin for LetterboxCameraPlugin {
     fn build(&self, app: &mut App) {
         app.add_startup_system(letterbox_init)
-            .add_system_to_stage(CoreStage::PostUpdate, camera_center.label("camera_center"))
-            .add_system_to_stage(CoreStage::PostUpdate, letterbox.after("camera_center"));
+            .add_system_to_stage(CoreStage::Update, camera_center)
+            .add_system_to_stage(CoreStage::PostUpdate, letterbox);
     }
 }

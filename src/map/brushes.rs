@@ -317,7 +317,7 @@ pub fn run_plan(
             };
             for i in size.w.iter() {
                 for j in size.h.iter() {
-                    c[(i, j)].layers[layer].tile = *tile.choose(r).unwrap();
+                    c[(i, j)].tile = *tile.choose(r).unwrap();
                 }
             }
             size

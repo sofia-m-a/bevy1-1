@@ -1,5 +1,4 @@
 pub mod brushes;
-pub mod map;
 
 use crate::{
     assets::{SpriteAssets, TILE_SIZE},
@@ -7,7 +6,7 @@ use crate::{
     map::brushes::*,
 };
 use bevy::{
-    math::{IVec2, Rect, Vec2, Vec3},
+    math::{IVec2, Rect, Vec3},
     prelude::*,
 };
 use itertools::Itertools;
@@ -87,44 +86,29 @@ impl Map {
 }
 
 pub struct Chunk {
-    pub grid: Vec<Slot>,
+    pub grid: Vec<ActiveTile>,
+    pub layer: u32,
 }
 
 impl Chunk {
     pub fn air() -> Self {
         Chunk {
-            grid: vec![Slot::default(); CHUNK_SIZE * CHUNK_SIZE],
+            grid: vec![ActiveTile::default(); CHUNK_SIZE * CHUNK_SIZE],
+            layer: 1,
         }
     }
 }
 
 impl Index<(u32, u32)> for Chunk {
-    type Output = Slot;
-    fn index(&self, s: (u32, u32)) -> &Slot {
+    type Output = ActiveTile;
+    fn index(&self, s: (u32, u32)) -> &ActiveTile {
         &self.grid[morton_encode([s.0, s.1]) as usize]
     }
 }
 
 impl IndexMut<(u32, u32)> for Chunk {
-    fn index_mut(&mut self, s: (u32, u32)) -> &mut Slot {
+    fn index_mut(&mut self, s: (u32, u32)) -> &mut ActiveTile {
         &mut self.grid[morton_encode([s.0, s.1]) as usize]
-    }
-}
-
-#[derive(Clone, Copy, PartialEq)]
-pub struct Slot {
-    pub layers: [ActiveTile; 3],
-}
-
-impl Default for Slot {
-    fn default() -> Self {
-        let s = ActiveTile {
-            tile: Tile::Air,
-            flip: Flip::empty(),
-            tint: Color::WHITE,
-            entity: None,
-        };
-        Self { layers: [s, s, s] }
     }
 }
 
@@ -134,6 +118,17 @@ pub struct ActiveTile {
     pub flip: Flip,
     pub tint: Color,
     pub entity: Option<Entity>,
+}
+
+impl Default for ActiveTile {
+    fn default() -> Self {
+        Self {
+            tile: Tile::Air,
+            flip: Flip::empty(),
+            tint: Color::WHITE,
+            entity: None,
+        }
+    }
 }
 
 bitflags::bitflags! {
@@ -163,47 +158,44 @@ fn load(
     parent: Entity,
 ) {
     for (i, tile) in c.grid.iter_mut().enumerate() {
-        for (index, layer) in tile.layers.iter_mut().enumerate() {
-            if layer.tile == Tile::Air {
-                continue;
-            }
-            let entity = layer
-                .entity
-                .unwrap_or_else(|| commands.spawn().insert(*layer).id());
-
-            let [a, b]: [u32; 2] = morton_decode(i as u64);
-
-            commands
-                .entity(entity)
-                //.insert(Parent(parent))
-                .insert_bundle(SpriteSheetBundle {
-                    sprite: TextureAtlasSprite {
-                        color: layer.tint,
-                        index: u16::from(layer.tile) as usize,
-                        flip_x: layer.flip.contains(Flip::FLIP_H),
-                        flip_y: layer.flip.contains(Flip::FLIP_V),
-                    },
-                    texture_atlas: sa.tile_texture.clone(),
-                    transform: Transform::from_translation(Vec3::new(
-                        (a as f32 + coord.x as f32 * CHUNK_SIZE as f32) * (TILE_SIZE as f32),
-                        (b as f32 + coord.y as f32 * CHUNK_SIZE as f32) * (TILE_SIZE as f32),
-                        index as f32,
-                    )),
-                    ..Default::default()
-                });
+        let layer = tile;
+        if layer.tile == Tile::Air {
+            continue;
         }
+        let entity = layer
+            .entity
+            .unwrap_or_else(|| commands.spawn().insert(*layer).id());
+
+        let [a, b]: [u32; 2] = morton_decode(i as u64);
+
+        commands
+            .entity(entity)
+            //.insert(Parent(parent))
+            .insert_bundle(SpriteSheetBundle {
+                sprite: TextureAtlasSprite {
+                    color: layer.tint,
+                    index: u16::from(layer.tile) as usize,
+                    flip_x: layer.flip.contains(Flip::FLIP_H),
+                    flip_y: layer.flip.contains(Flip::FLIP_V),
+                },
+                texture_atlas: sa.tile_texture.clone(),
+                transform: Transform::from_translation(Vec3::new(
+                    (a as f32 + coord.x as f32 * CHUNK_SIZE as f32) * (TILE_SIZE as f32),
+                    (b as f32 + coord.y as f32 * CHUNK_SIZE as f32) * (TILE_SIZE as f32),
+                    1 as f32,
+                )),
+                ..Default::default()
+            });
     }
 }
 
 fn unload(c: &mut Chunk, commands: &mut Commands) {
-    for tile in c.grid.iter_mut() {
-        for l in tile.layers.iter_mut() {
-            if let Some(t) = l.entity {
-                commands
-                    .entity(t)
-                    .remove_bundle::<SpriteSheetBundle>()
-                    .remove::<Parent>();
-            }
+    for l in c.grid.iter_mut() {
+        if let Some(t) = l.entity {
+            commands
+                .entity(t)
+                .remove_bundle::<SpriteSheetBundle>()
+                .remove::<Parent>();
         }
     }
 }
@@ -325,7 +317,6 @@ fn sample_kind(p: Place, g: &mut Gen) -> Kind {
         }
     } else {
         let k = ((sample_random(zc, g).abs() * 10.0) % 10.0) as u32;
-        dbg!(k);
         let bt = match k {
             0 => Some(BoxPiece::Item { used: false }),
             1 => Some(BoxPiece::Coin { used: false }),
@@ -375,47 +366,41 @@ fn gen_chunk(c: &mut Chunk, p: Place, g: &mut Gen) {
         match info.feature {
             Feature::Run(h) => {
                 for y in 0..h {
-                    c[(i as u32, y)].layers[1].tile = Tile::Ground(Terrain::Interior, info.theme)
+                    c[(i as u32, y)].tile = Tile::Ground(Terrain::Interior, info.theme)
                 }
                 if h > 0 {
-                    c[(i as u32, h - 1)].layers[1].tile =
-                        Tile::Ground(Terrain::Ground(LMR::M), info.theme)
+                    c[(i as u32, h - 1)].tile = Tile::Ground(Terrain::Ground(LMR::M), info.theme)
                 }
             }
             Feature::Hills(h) => {
                 for y in 0..h {
-                    c[(i as u32, y)].layers[1].tile = Tile::Ground(Terrain::Interior, info.theme)
+                    c[(i as u32, y)].tile = Tile::Ground(Terrain::Interior, info.theme)
                 }
                 match top[i as usize] {
                     Top::TSlope(s) => {
-                        c[(i as u32, h)].layers[1].tile =
-                            Tile::Ground(Terrain::SlopeInt(s), info.theme);
+                        c[(i as u32, h)].tile = Tile::Ground(Terrain::SlopeInt(s), info.theme);
                         if h < CHUNK_SIZE as u32 + 1 {
-                            c[(i as u32, h + 1)].layers[1].tile =
-                                Tile::Ground(Terrain::Slope(s), info.theme);
+                            c[(i as u32, h + 1)].tile = Tile::Ground(Terrain::Slope(s), info.theme);
                         }
                     }
                     Top::TGround => {
-                        c[(i as u32, h)].layers[1].tile =
-                            Tile::Ground(Terrain::Ground(LMR::M), info.theme)
+                        c[(i as u32, h)].tile = Tile::Ground(Terrain::Ground(LMR::M), info.theme)
                     }
                     Top::TLedge(k) => {
-                        c[(i as u32, h)].layers[1].tile =
-                            Tile::Ground(Terrain::Ground(LMR::M), info.theme);
-                        c[(i as u32, k + 1)].layers[1].tile = Tile::LogLedge;
+                        c[(i as u32, h)].tile = Tile::Ground(Terrain::Ground(LMR::M), info.theme);
+                        c[(i as u32, k + 1)].tile = Tile::LogLedge;
                     }
                 }
             }
             Feature::ItemBoxes(h, bh, box_type) => {
                 for y in 0..h {
-                    c[(i as u32, y)].layers[1].tile = Tile::Ground(Terrain::Interior, info.theme)
+                    c[(i as u32, y)].tile = Tile::Ground(Terrain::Interior, info.theme)
                 }
                 if h > 0 {
-                    c[(i as u32, h - 1)].layers[1].tile =
-                        Tile::Ground(Terrain::Ground(LMR::M), info.theme)
+                    c[(i as u32, h - 1)].tile = Tile::Ground(Terrain::Ground(LMR::M), info.theme)
                 }
                 if let Some(box_type) = box_type {
-                    c[(i as u32, bh)].layers[1].tile = Tile::Box(box_type);
+                    c[(i as u32, bh)].tile = Tile::Box(box_type);
                 }
             }
             Feature::Air => {}
