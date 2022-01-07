@@ -13,7 +13,7 @@ use assets::{
     set_texture_filters_to_nearest, setup_sprites, SpriteAssets, SHEET_H, SHEET_W, TILE_SIZE,
 };
 use camera::*;
-use map::{chunk_load_unload, Map};
+use map::{chunk_loader, Gen};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
 enum GameState {
@@ -45,7 +45,7 @@ fn main() {
         .add_system_set(
             SystemSet::on_update(GameState::Level)
                 .with_system(keyboard_input_system)
-                .with_system(chunk_load_unload),
+                .with_system(chunk_loader),
         )
         .add_system(set_texture_filters_to_nearest)
         .run();
@@ -106,13 +106,7 @@ fn setup(
             aspect_ratio: ASPECT_X / ASPECT_Y,
         });
 
-    commands
-        .spawn()
-        // .insert(MapView::default())
-        .insert(Map::new())
-        .insert(Transform::from_scale(
-            Vec2::splat(TILE_SIZE as f32).extend(1.0),
-        ));
+    commands.insert_resource(Gen::new());
 
     // physics
     //rapier.scale = TILE_SIZE as f32;

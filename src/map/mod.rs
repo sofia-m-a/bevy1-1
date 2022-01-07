@@ -10,15 +10,11 @@ use bevy::{
     prelude::*,
 };
 use itertools::Itertools;
-use lindel::{morton_decode, morton_encode};
 use noise::{NoiseFn, Seedable};
 use rand::prelude::*;
 use rand::{thread_rng, SeedableRng};
 use rand_pcg::Pcg64;
-use std::{
-    collections::{HashMap, HashSet},
-    ops::{Index, IndexMut},
-};
+use std::collections::HashSet;
 
 pub struct Gen {
     zone: noise::Worley,
@@ -51,67 +47,14 @@ impl Gen {
     }
 }
 
-#[derive(Component)]
-pub struct Map {
-    pub chunks: HashMap<Place, Chunk>,
-    pub gen: Gen,
-}
+pub fn intersect(r: Rect<f32>) -> impl Iterator<Item = Place> {
+    let chunk_start_x = f32::floor(r.left / CHUNK_SIZE as f32) as i32;
+    let chunk_end_x = f32::ceil(r.right / CHUNK_SIZE as f32) as i32;
+    let chunk_start_y = f32::floor(r.bottom / CHUNK_SIZE as f32) as i32;
+    let chunk_end_y = f32::ceil(r.top / CHUNK_SIZE as f32) as i32;
 
-impl Map {
-    pub fn new() -> Self {
-        Map {
-            chunks: HashMap::new(),
-            gen: Gen::new(),
-        }
-    }
-
-    pub fn intersect(r: Rect<f32>) -> impl Iterator<Item = Place> {
-        let chunk_start_x = f32::floor(r.left / CHUNK_SIZE as f32) as i32;
-        let chunk_end_x = f32::ceil(r.right / CHUNK_SIZE as f32) as i32;
-        let chunk_start_y = f32::floor(r.bottom / CHUNK_SIZE as f32) as i32;
-        let chunk_end_y = f32::ceil(r.top / CHUNK_SIZE as f32) as i32;
-
-        itertools::iproduct!(chunk_start_x..=chunk_end_x, chunk_start_y..=chunk_end_y)
-            .map(|(a, b)| Place::new(a, b))
-    }
-
-    fn get_changes(&self, r: Rect<f32>) -> (HashSet<Place>, HashSet<Place>) {
-        let c: HashSet<Place> = HashSet::from_iter(Self::intersect(r));
-        let d: HashSet<Place> = HashSet::from_iter(self.chunks.keys().copied());
-
-        let must_make = HashSet::from_iter(c.difference(&d).copied());
-        let must_delete = HashSet::from_iter(d.difference(&c).copied());
-        (must_make, must_delete)
-    }
-}
-
-pub struct Chunk {
-    pub grid: Vec<ActiveTile>,
-    pub layer: u32,
-    pub place: Place,
-}
-
-impl Chunk {
-    pub fn air() -> Self {
-        Chunk {
-            grid: vec![ActiveTile::default(); CHUNK_SIZE * CHUNK_SIZE],
-            layer: 1,
-            place: Place::ZERO,
-        }
-    }
-}
-
-impl Index<(u32, u32)> for Chunk {
-    type Output = ActiveTile;
-    fn index(&self, s: (u32, u32)) -> &ActiveTile {
-        &self.grid[morton_encode([s.0, s.1]) as usize]
-    }
-}
-
-impl IndexMut<(u32, u32)> for Chunk {
-    fn index_mut(&mut self, s: (u32, u32)) -> &mut ActiveTile {
-        &mut self.grid[morton_encode([s.0, s.1]) as usize]
-    }
+    itertools::iproduct!(chunk_start_x..=chunk_end_x, chunk_start_y..=chunk_end_y)
+        .map(|(a, b)| Place::new(a, b))
 }
 
 #[derive(Clone, Copy, PartialEq, Component)]
@@ -119,7 +62,6 @@ pub struct ActiveTile {
     pub tile: Tile,
     pub flip: Flip,
     pub tint: Color,
-    pub entity: Option<Entity>,
 }
 
 impl Default for ActiveTile {
@@ -128,7 +70,6 @@ impl Default for ActiveTile {
             tile: Tile::Air,
             flip: Flip::empty(),
             tint: Color::WHITE,
-            entity: None,
         }
     }
 }
@@ -147,100 +88,27 @@ impl From<Tile> for ActiveTile {
             tile: t,
             flip: Flip::empty(),
             tint: Color::WHITE,
-            entity: None,
-        }
-    }
-}
-
-fn load(
-    c: &mut Chunk,
-    commands: &mut Commands,
-    sa: &Res<SpriteAssets>,
-    coord: Place,
-    parent: Entity,
-) {
-    for (i, tile) in c.grid.iter_mut().enumerate() {
-        let layer = tile;
-        if layer.tile == Tile::Air {
-            continue;
-        }
-        let entity = layer
-            .entity
-            .unwrap_or_else(|| commands.spawn().insert(*layer).id());
-
-        let [a, b]: [u32; 2] = morton_decode(i as u64);
-
-        commands
-            .entity(entity)
-            //.insert(Parent(parent))
-            .insert_bundle(SpriteSheetBundle {
-                sprite: TextureAtlasSprite {
-                    color: layer.tint,
-                    index: u16::from(layer.tile) as usize,
-                    flip_x: layer.flip.contains(Flip::FLIP_H),
-                    flip_y: layer.flip.contains(Flip::FLIP_V),
-                },
-                texture_atlas: sa.tile_texture.clone(),
-                transform: Transform::from_translation(Vec3::new(
-                    (a as f32 + coord.x as f32 * CHUNK_SIZE as f32) * (TILE_SIZE as f32),
-                    (b as f32 + coord.y as f32 * CHUNK_SIZE as f32) * (TILE_SIZE as f32),
-                    1 as f32,
-                )),
-                ..Default::default()
-            });
-    }
-}
-
-fn unload(c: &mut Chunk, commands: &mut Commands) {
-    for l in c.grid.iter_mut() {
-        if let Some(t) = l.entity {
-            commands
-                .entity(t)
-                .remove_bundle::<SpriteSheetBundle>()
-                .remove::<Parent>();
-        }
-    }
-}
-
-pub fn chunk_load_unload(
-    mut commands: Commands,
-    mut maps: Query<(Entity, &mut Map)>,
-    sa: Res<SpriteAssets>,
-    views: Query<&SofiaCamera>,
-) {
-    if let Some(view) = views.iter().next() {
-        for (entity, mut map) in maps.iter_mut() {
-            let (must_make, must_delete) = map.get_changes(view.view);
-            for coord in must_make.iter() {
-                let mut chunk = Chunk::air();
-                chunk.place = *coord;
-                gen_chunk(&mut chunk, *coord, &mut map.gen);
-                load(&mut chunk, &mut commands, &sa, *coord, entity);
-                map.chunks.insert(*coord, chunk);
-            }
-
-            for coord in must_delete.iter() {
-                if let Some(chunk) = map.chunks.get_mut(coord) {
-                    unload(chunk, &mut commands)
-                }
-            }
         }
     }
 }
 
 #[derive(Component)]
-struct Chunk2;
+pub struct Chunk;
 
-fn chunk2(
+pub fn chunk_loader(
     mut commands: Commands,
-    chunks: Query<(Entity, &Chunk2, &Transform)>,
+    chunks: Query<(Entity, &Chunk, &Transform)>,
+    mut res_gen: ResMut<Gen>,
     sa: Res<SpriteAssets>,
     views: Query<&SofiaCamera>,
 ) {
     if let Some(view) = views.iter().next() {
-        let mut visible: HashSet<Place> = HashSet::from_iter(Map::intersect(view.view));
+        let mut visible: HashSet<Place> = HashSet::from_iter(intersect(view.view));
         for c in chunks.iter() {
-            let place = Place::new(c.2.translation.x as i32, c.2.translation.y as i32);
+            let place = Place::new(
+                (c.2.translation.x / (CHUNK_SIZE as f32 * TILE_SIZE as f32)) as i32,
+                (c.2.translation.y / (CHUNK_SIZE as f32 * TILE_SIZE as f32)) as i32,
+            );
             if visible.contains(&place) {
                 visible.remove(&place);
             } else {
@@ -252,9 +120,9 @@ fn chunk2(
         for p in visible.iter() {
             let mut children = Vec::new();
             // load
-            let tiles = gen();
+            let tiles = gen(*p, &mut res_gen);
             for (p, t) in tiles.iter() {
-                if t.tile == Tile::Air {
+                if *t == Tile::Air {
                     continue;
                 }
 
@@ -262,25 +130,139 @@ fn chunk2(
                     .spawn()
                     .insert_bundle(SpriteSheetBundle {
                         sprite: TextureAtlasSprite {
-                            index: u16::from(t.tile) as usize,
+                            index: u16::from(*t) as usize,
                             ..Default::default()
                         },
                         texture_atlas: sa.tile_texture.clone(),
                         transform: Transform::from_translation(Vec3::new(
-                            p.x as f32, p.y as f32, 1 as f32,
+                            p.x as f32 * TILE_SIZE as f32,
+                            p.y as f32 * TILE_SIZE as f32,
+                            1 as f32,
                         )),
                         ..Default::default()
                     })
                     .id();
                 children.push(id);
             }
-            commands.spawn().insert(Chunk2).push_children(&children);
+            commands
+                .spawn()
+                .insert(Chunk)
+                .insert(Transform::from_translation(Vec3::new(
+                    p.x as f32 * CHUNK_SIZE as f32 * TILE_SIZE as f32,
+                    p.y as f32 * CHUNK_SIZE as f32 * TILE_SIZE as f32,
+                    1.0,
+                )))
+                .insert(GlobalTransform::default())
+                .push_children(&children);
         }
     }
 }
 
-fn gen() -> Vec<(Place, ActiveTile)> {
-    todo!()
+fn gen(p: Place, g: &mut Gen) -> Vec<(Place, Tile)> {
+    let mut c = Vec::new();
+    let mut kinds = Vec::new();
+    for i in -1..(CHUNK_SIZE as i32 + 1) {
+        kinds.push(sample_kind(p * CHUNK_SIZE as i32 + i * Place::X, g));
+    }
+
+    #[derive(Clone, Copy, Debug)]
+    enum Top {
+        TSlope(Slope),
+        TGround,
+        TLedge(u32),
+    }
+
+    let mut top = Vec::new();
+    for (x0, x1, x2) in kinds.iter().copied().tuple_windows() {
+        let x0 = u32::from(x0.feature);
+        let x1 = u32::from(x1.feature);
+        let x2 = u32::from(x2.feature);
+
+        use Top::*;
+        if x0 == x2 && x0 > x1 {
+            top.push(TLedge(x0));
+        } else if x0 == x1 + 1 {
+            top.push(TSlope(Slope::DownLeft));
+        } else if x1 + 1 == x2 {
+            top.push(TSlope(Slope::UpRight));
+        } else {
+            top.push(TGround)
+        }
+    }
+
+    for (i, info) in kinds[1..=CHUNK_SIZE].iter().copied().enumerate() {
+        match info.feature {
+            Feature::Run(h) => {
+                for y in 0..h {
+                    c.push((
+                        Place::new(i as i32, y as i32),
+                        Tile::Ground(Terrain::Interior, info.theme),
+                    ));
+                }
+                if h > 0 {
+                    c.push((
+                        Place::new(i as i32, (h - 1) as i32),
+                        Tile::Ground(Terrain::Ground(LMR::M), info.theme),
+                    ));
+                }
+            }
+            Feature::Hills(h) => {
+                for y in 0..h {
+                    c.push((
+                        Place::new(i as i32, y as i32),
+                        Tile::Ground(Terrain::Interior, info.theme),
+                    ));
+                }
+                match top[i as usize] {
+                    Top::TSlope(s) => {
+                        c.push((
+                            Place::new(i as i32, h as i32),
+                            Tile::Ground(Terrain::SlopeInt(s), info.theme),
+                        ));
+                        if h < CHUNK_SIZE as u32 + 1 {
+                            c.push((
+                                Place::new(i as i32, (h + 1) as i32),
+                                Tile::Ground(Terrain::Slope(s), info.theme),
+                            ));
+                        }
+                    }
+                    Top::TGround => {
+                        c.push((
+                            Place::new(i as i32, h as i32),
+                            Tile::Ground(Terrain::Ground(LMR::M), info.theme),
+                        ));
+                    }
+                    Top::TLedge(k) => {
+                        c.push((
+                            Place::new(i as i32, h as i32),
+                            Tile::Ground(Terrain::Ground(LMR::M), info.theme),
+                        ));
+                        c.push((Place::new(i as i32, (k + 1) as i32), Tile::LogLedge));
+                    }
+                }
+            }
+            Feature::ItemBoxes(h, bh, box_type) => {
+                for y in 0..h {
+                    c.push((
+                        Place::new(i as i32, y as i32),
+                        Tile::Ground(Terrain::Interior, info.theme),
+                    ));
+                }
+                if h > 0 {
+                    c.push((
+                        Place::new(i as i32, (h - 1) as i32),
+                        Tile::Ground(Terrain::Ground(LMR::M), info.theme),
+                    ));
+                }
+                if let Some(box_type) = box_type {
+                    c.push((Place::new(i as i32, bh as i32), Tile::Box(box_type)));
+                }
+            }
+            Feature::Air => {}
+        }
+    }
+
+    c
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -384,83 +366,6 @@ fn sample_kind(p: Place, g: &mut Gen) -> Kind {
         Kind {
             theme,
             feature: Feature::ItemBoxes(height as u32, height as u32 + 4, bt),
-        }
-    }
-}
-
-fn gen_chunk(c: &mut Chunk, p: Place, g: &mut Gen) {
-    let mut kinds = Vec::new();
-    for i in -1..(CHUNK_SIZE as i32 + 1) {
-        kinds.push(sample_kind(p * CHUNK_SIZE as i32 + i * Place::X, g));
-    }
-
-    #[derive(Clone, Copy, Debug)]
-    enum Top {
-        TSlope(Slope),
-        TGround,
-        TLedge(u32),
-    }
-
-    let mut top = Vec::new();
-    for (x0, x1, x2) in kinds.iter().copied().tuple_windows() {
-        let x0 = u32::from(x0.feature);
-        let x1 = u32::from(x1.feature);
-        let x2 = u32::from(x2.feature);
-
-        use Top::*;
-        if x0 == x2 && x0 > x1 {
-            top.push(TLedge(x0));
-        } else if x0 == x1 + 1 {
-            top.push(TSlope(Slope::DownLeft));
-        } else if x1 + 1 == x2 {
-            top.push(TSlope(Slope::UpRight));
-        } else {
-            top.push(TGround)
-        }
-    }
-
-    for (i, info) in kinds[1..=CHUNK_SIZE].iter().copied().enumerate() {
-        match info.feature {
-            Feature::Run(h) => {
-                for y in 0..h {
-                    c[(i as u32, y)].tile = Tile::Ground(Terrain::Interior, info.theme)
-                }
-                if h > 0 {
-                    c[(i as u32, h - 1)].tile = Tile::Ground(Terrain::Ground(LMR::M), info.theme)
-                }
-            }
-            Feature::Hills(h) => {
-                for y in 0..h {
-                    c[(i as u32, y)].tile = Tile::Ground(Terrain::Interior, info.theme)
-                }
-                match top[i as usize] {
-                    Top::TSlope(s) => {
-                        c[(i as u32, h)].tile = Tile::Ground(Terrain::SlopeInt(s), info.theme);
-                        if h < CHUNK_SIZE as u32 + 1 {
-                            c[(i as u32, h + 1)].tile = Tile::Ground(Terrain::Slope(s), info.theme);
-                        }
-                    }
-                    Top::TGround => {
-                        c[(i as u32, h)].tile = Tile::Ground(Terrain::Ground(LMR::M), info.theme)
-                    }
-                    Top::TLedge(k) => {
-                        c[(i as u32, h)].tile = Tile::Ground(Terrain::Ground(LMR::M), info.theme);
-                        c[(i as u32, k + 1)].tile = Tile::LogLedge;
-                    }
-                }
-            }
-            Feature::ItemBoxes(h, bh, box_type) => {
-                for y in 0..h {
-                    c[(i as u32, y)].tile = Tile::Ground(Terrain::Interior, info.theme)
-                }
-                if h > 0 {
-                    c[(i as u32, h - 1)].tile = Tile::Ground(Terrain::Ground(LMR::M), info.theme)
-                }
-                if let Some(box_type) = box_type {
-                    c[(i as u32, bh)].tile = Tile::Box(box_type);
-                }
-            }
-            Feature::Air => {}
         }
     }
 }
