@@ -88,6 +88,7 @@ impl Map {
 pub struct Chunk {
     pub grid: Vec<ActiveTile>,
     pub layer: u32,
+    pub place: Place,
 }
 
 impl Chunk {
@@ -95,6 +96,7 @@ impl Chunk {
         Chunk {
             grid: vec![ActiveTile::default(); CHUNK_SIZE * CHUNK_SIZE],
             layer: 1,
+            place: Place::ZERO,
         }
     }
 }
@@ -211,7 +213,7 @@ pub fn chunk_load_unload(
             let (must_make, must_delete) = map.get_changes(view.view);
             for coord in must_make.iter() {
                 let mut chunk = Chunk::air();
-                //generate_island(&mut chunk, &mut map.gen.rng);
+                chunk.place = *coord;
                 gen_chunk(&mut chunk, *coord, &mut map.gen);
                 load(&mut chunk, &mut commands, &sa, *coord, entity);
                 map.chunks.insert(*coord, chunk);
@@ -224,6 +226,61 @@ pub fn chunk_load_unload(
             }
         }
     }
+}
+
+#[derive(Component)]
+struct Chunk2;
+
+fn chunk2(
+    mut commands: Commands,
+    chunks: Query<(Entity, &Chunk2, &Transform)>,
+    sa: Res<SpriteAssets>,
+    views: Query<&SofiaCamera>,
+) {
+    if let Some(view) = views.iter().next() {
+        let mut visible: HashSet<Place> = HashSet::from_iter(Map::intersect(view.view));
+        for c in chunks.iter() {
+            let place = Place::new(c.2.translation.x as i32, c.2.translation.y as i32);
+            if visible.contains(&place) {
+                visible.remove(&place);
+            } else {
+                // unload
+                commands.entity(c.0).despawn_recursive();
+            }
+        }
+
+        for p in visible.iter() {
+            let mut children = Vec::new();
+            // load
+            let tiles = gen();
+            for (p, t) in tiles.iter() {
+                if t.tile == Tile::Air {
+                    continue;
+                }
+
+                let id = commands
+                    .spawn()
+                    .insert_bundle(SpriteSheetBundle {
+                        sprite: TextureAtlasSprite {
+                            index: u16::from(t.tile) as usize,
+                            ..Default::default()
+                        },
+                        texture_atlas: sa.tile_texture.clone(),
+                        transform: Transform::from_translation(Vec3::new(
+                            p.x as f32, p.y as f32, 1 as f32,
+                        )),
+                        ..Default::default()
+                    })
+                    .id();
+                children.push(id);
+            }
+            commands.spawn().insert(Chunk2).push_children(&children);
+        }
+    }
+}
+
+fn gen() -> Vec<(Place, ActiveTile)> {
+    todo!()
 }
 
 #[derive(Clone, Copy, Debug)]
