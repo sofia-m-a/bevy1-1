@@ -198,11 +198,32 @@ impl From<TreeTrunkPiece> for u16 {
 
 #[allow(dead_code)]
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum BoxPiece {
+    Item { used: bool },
+    Coin { used: bool },
+    Crate,
+}
+
+impl From<BoxPiece> for u16 {
+    fn from(b: BoxPiece) -> u16 {
+        use BoxPiece::*;
+        match b {
+            Item { used } => 1 * SHEET_W + (1 - u16::from(used)),
+            Coin { used } => 2 * SHEET_W + (1 - u16::from(used)),
+            Crate => 3 * SHEET_W,
+        }
+    }
+}
+
+#[allow(dead_code)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Tile {
     Ground(Terrain, TerrainTheme),
     Igloo(IglooPiece),
     Tree(TreePiece),
     Trunk(TreeTrunkPiece),
+    LogLedge,
+    Box(BoxPiece),
     Air,
 }
 use Tile::*;
@@ -215,6 +236,8 @@ impl From<Tile> for u16 {
             Tile::Igloo(piece) => 20 + SHEET_W * 14 + u16::from(piece),
             Tile::Tree(piece) => 20 + SHEET_W * 11 + u16::from(piece),
             Tile::Trunk(piece) => 16 + SHEET_W * 8 + u16::from(piece),
+            Tile::LogLedge => 11 + 17 * SHEET_W,
+            Tile::Box(piece) => 10 + 13 * SHEET_W + u16::from(piece),
         }
     }
 }

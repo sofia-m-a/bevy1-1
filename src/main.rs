@@ -13,7 +13,11 @@ use assets::{
     set_texture_filters_to_nearest, setup_sprites, SpriteAssets, SHEET_H, SHEET_W, TILE_SIZE,
 };
 use camera::*;
-use map::{chunk_load_unload, Map};
+use map::{
+    chunk_load_unload,
+    map::{chunk_system, MapView},
+    Map,
+};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
 enum GameState {
@@ -45,7 +49,6 @@ fn main() {
         .add_system_set(
             SystemSet::on_update(GameState::Level)
                 .with_system(keyboard_input_system)
-                .before("camera_center")
                 .with_system(chunk_load_unload),
         )
         .add_system(set_texture_filters_to_nearest)
@@ -109,23 +112,18 @@ fn setup(
 
     commands
         .spawn()
+        // .insert(MapView::default())
         .insert(Map::new())
         .insert(Transform::from_scale(
             Vec2::splat(TILE_SIZE as f32).extend(1.0),
         ));
+
     // physics
     //rapier.scale = TILE_SIZE as f32;
     //rapier.gravity = Vec2::new(0.0, -40.0).into();
 
     // clear color for sky
     *color = ClearColor(SKY_COLOR);
-
-    // generate_chunk(
-    //     &mut commands,
-    //     &mut map_query,
-    //     graphics.tile_texture.clone(),
-    //     0u16,
-    // );
 }
 
 fn setup_player(mut commands: Commands, graphics: Res<SpriteAssets>) {

@@ -1,4 +1,5 @@
 pub mod brushes;
+pub mod map;
 
 use crate::{
     assets::{SpriteAssets, TILE_SIZE},
@@ -9,6 +10,7 @@ use bevy::{
     math::{IVec2, Rect, Vec2, Vec3},
     prelude::*,
 };
+use itertools::Itertools;
 use lindel::{morton_decode, morton_encode};
 use noise::{NoiseFn, Seedable};
 use rand::prelude::*;
@@ -20,25 +22,16 @@ use std::{
 };
 
 pub struct Gen {
-    rng: Pcg64,
     zone: noise::Worley,
-    zone_x: noise::Fbm,
-    zone_y: noise::Fbm,
     terrain: noise::OpenSimplex,
+    theme: noise::Value,
 }
 
 // must be a power of two for Morton encoding to work
 // otherwise we need to change CHUNK_SIZE^2 below to to_nearest_pow2(CHUNK_SIZE)^2
-pub const CHUNK_SIZE: usize = 4;
+pub const CHUNK_SIZE: usize = 32;
 
 pub type Place = IVec2;
-
-#[derive(Clone, Copy, Debug)]
-pub struct Zone {
-    origin: Place,
-    center: Vec2,
-    cell: f64,
-}
 
 impl Gen {
     pub fn new() -> Self {
@@ -48,169 +41,13 @@ impl Gen {
         let zone = noise::Worley::new()
             .set_seed(rng.next_u32())
             .set_range_function(noise::RangeFunction::Manhattan)
-            .enable_range(true);
-
-        let zone_x = noise::Fbm::new().set_seed(rng.next_u32());
-        let zone_y = noise::Fbm::new().set_seed(rng.next_u32());
+            .enable_range(false);
+        let theme = noise::Value::new().set_seed(rng.next_u32());
 
         Self {
-            rng,
             zone,
-            zone_x,
-            zone_y,
             terrain,
-        }
-    }
-
-    // fn get_zone(&self, coord: Place) -> f64 {
-    //     self.zone.get([coord.x as f64, coord.y as f64])
-    // }
-
-    // fn get_zone_v(&self, coord: Place) -> Vec2 {
-    //     Vec2::new(
-    //         self.zone_x.get([coord.x as f64, coord.y as f64]) as f32,
-    //         self.zone_y.get([coord.x as f64, coord.y as f64]) as f32,
-    //     ) * (CHUNK_SIZE as f32)
-    //         + Vec2::new(coord.x as f32, coord.y as f32)
-    // }
-
-    // fn zones_in_chunk(&self, coord: Place) -> [Zone; 4] {
-    //     let xx = (CHUNK_SIZE as i32) * Place::X;
-    //     let yy = (CHUNK_SIZE as i32) * Place::Y;
-    //     let tlc = self.get_zone(coord + yy);
-    //     let trc = self.get_zone(coord + yy + xx);
-    //     let blc = self.get_zone(coord);
-    //     let brc = self.get_zone(coord + xx);
-    //     let tlz = self.get_zone_v(coord + yy);
-    //     let trz = self.get_zone_v(coord + yy + xx);
-    //     let blz = self.get_zone_v(coord);
-    //     let brz = self.get_zone_v(coord + xx);
-
-    //     [
-    //         Zone {
-    //             origin: coord + yy,
-    //             center: tlz,
-    //             cell: tlc,
-    //         },
-    //         Zone {
-    //             origin: coord + yy + xx,
-    //             center: trz,
-    //             cell: trc,
-    //         },
-    //         Zone {
-    //             origin: coord,
-    //             center: blz,
-    //             cell: blc,
-    //         },
-    //         Zone {
-    //             origin: coord + xx,
-    //             center: brz,
-    //             cell: brc,
-    //         },
-    //     ]
-    // }
-}
-
-pub fn generate_island(c: &mut Chunk, rng: &mut Pcg64) {
-    let noise = noise::OpenSimplex::new().set_seed(rng.next_u32());
-
-    let set = *[
-        TerrainTheme::Grass,
-        TerrainTheme::Dirt,
-        TerrainTheme::Sand,
-        TerrainTheme::Stone,
-        TerrainTheme::Castle,
-        TerrainTheme::Metal,
-        TerrainTheme::Stone,
-        TerrainTheme::Snow,
-        TerrainTheme::Tundra,
-        TerrainTheme::Cake,
-        TerrainTheme::Choco,
-    ]
-    .choose(rng)
-    .unwrap();
-
-    let mut height_map = [0; CHUNK_SIZE];
-
-    for i in 0..CHUNK_SIZE {
-        let height = (12.0 * noise.get([(i as f64) * 0.04, i as f64 * 0.04]).abs()) as u32;
-        height_map[i] = height;
-    }
-
-    #[derive(Clone, Copy, PartialEq, Eq)]
-    enum Type {
-        Flat,
-        Slope(Slope),
-    }
-
-    let mut type_map = [Type::Flat; CHUNK_SIZE];
-    for i in 0..CHUNK_SIZE {
-        let left = height_map[i.saturating_sub(1)];
-        let right = height_map[(i + 1).min(CHUNK_SIZE - 1)];
-        let current = height_map[i];
-
-        let slope_up = right == left + 1 && current == right;
-        let slope_down = left == right + 1 && current == left;
-
-        type_map[i] = if slope_up {
-            Type::Slope(Slope::UpRight)
-        } else if slope_down {
-            Type::Slope(Slope::DownLeft)
-        } else {
-            Type::Flat
-        };
-    }
-
-    for i in 0..CHUNK_SIZE {
-        let current = height_map[i];
-        for j in 0..=current {
-            let top = j == current;
-            let top1 = current != 0 && j == (current - 1);
-
-            let tile = match type_map[i] {
-                Type::Slope(s) if top => Terrain::Slope(s),
-                Type::Slope(s) if top1 => Terrain::SlopeInt(s),
-                Type::Flat if top => Terrain::Ground(LMR::M),
-                _ => Terrain::Interior,
-            };
-
-            c[(i as u32, j)].layers[1] = Tile::Ground(tile, set).into();
-        }
-    }
-
-    for i in 0..CHUNK_SIZE {
-        let left = height_map[i.saturating_sub(1)];
-        let right = height_map[(i + 1).min(CHUNK_SIZE - 1)];
-        let current = height_map[i];
-        let lty = type_map[i.saturating_sub(1)];
-        let rty = type_map[(i + 1).min(CHUNK_SIZE - 1)];
-        let cty = type_map[i];
-        if current != left && lty == Type::Flat && cty == Type::Flat {
-            c[(i as u32, left)].layers[2] = Tile::Ground(Terrain::LedgeCap(LR::R), set).into();
-        }
-        if current != right && rty == Type::Flat && cty == Type::Flat {
-            c[(i as u32, right)].layers[2] = Tile::Ground(Terrain::LedgeCap(LR::L), set).into();
-        }
-    }
-
-    let mut runs = Vec::new();
-    let mut run_start = 0;
-    let mut run_height = height_map[0];
-    for i in 0..CHUNK_SIZE {
-        let this = height_map[i];
-        if this != run_height {
-            runs.push((run_start, i, run_height));
-            run_start = i;
-            run_height = this;
-        }
-    }
-
-    for (start, end, height) in runs {
-        let length = end - start;
-        if length >= 10 && rng.gen_bool(0.2 + f64::clamp(length as f64 / 60.0, 0.0, 0.5)) {
-            //let plan = igloo((3, 3), rng);
-            let plan = pine_tree(true, 10, 10);
-            run_plan(plan, c, rng, (start as u32, height + 1), 1);
+            theme,
         }
     }
 }
@@ -218,7 +55,6 @@ pub fn generate_island(c: &mut Chunk, rng: &mut Pcg64) {
 #[derive(Component)]
 pub struct Map {
     pub chunks: HashMap<Place, Chunk>,
-    pub loaded_zones: HashSet<Place>,
     pub gen: Gen,
 }
 
@@ -226,7 +62,6 @@ impl Map {
     pub fn new() -> Self {
         Map {
             chunks: HashMap::new(),
-            loaded_zones: HashSet::new(),
             gen: Gen::new(),
         }
     }
@@ -248,58 +83,6 @@ impl Map {
         let must_make = HashSet::from_iter(c.difference(&d).copied());
         let must_delete = HashSet::from_iter(d.difference(&c).copied());
         (must_make, must_delete)
-    }
-
-    fn set(&mut self, coord: Place, t: Tile, l: usize) {
-        let (ckx, skx) = (
-            coord.x.div_euclid(CHUNK_SIZE as i32),
-            coord.x.rem_euclid(CHUNK_SIZE as i32),
-        );
-        let (cky, sky) = (
-            coord.y.div_euclid(CHUNK_SIZE as i32),
-            coord.y.rem_euclid(CHUNK_SIZE as i32),
-        );
-
-        let chunk_key = Place::new(ckx, cky);
-        let slot_key = Place::new(skx, sky);
-
-        let entry = self.chunks.entry(chunk_key);
-        let chunk = entry.or_insert_with(|| Chunk::air());
-        chunk[(slot_key.x as u32, slot_key.y as u32)].layers[l].tile = t;
-    }
-
-    fn generate_zone(&mut self, zone: Zone) {
-        let set = *[
-            TerrainTheme::Grass,
-            TerrainTheme::Dirt,
-            TerrainTheme::Sand,
-            TerrainTheme::Stone,
-            TerrainTheme::Castle,
-            TerrainTheme::Metal,
-            TerrainTheme::Stone,
-            TerrainTheme::Snow,
-            TerrainTheme::Tundra,
-            TerrainTheme::Cake,
-            TerrainTheme::Choco,
-        ]
-        .choose(&mut self.gen.rng)
-        .unwrap();
-        dbg!(zone.center);
-        self.set(
-            Place::new(zone.center.x as i32, zone.center.y as i32),
-            Tile::Ground(Terrain::Block, set),
-            1,
-        );
-        // let chunk_coord = Coordinate::new(zone.center.x as i32, zone.center.y as i32);
-        // for i in 0..(CHUNK_SIZE as i32) {
-        //     for j in 0..(CHUNK_SIZE as i32) {
-        //         self.set(
-        //             chunk_coord + Coordinate::new(i, j),
-        //             Tile::Ground(Terrain::Block, set),
-        //             1,
-        //         );
-        //     }
-        // }
     }
 }
 
@@ -373,43 +156,41 @@ impl From<Tile> for ActiveTile {
 }
 
 fn load(
-    c: &mut Map,
+    c: &mut Chunk,
     commands: &mut Commands,
     sa: &Res<SpriteAssets>,
     coord: Place,
     parent: Entity,
 ) {
-    if let Some(c) = c.chunks.get_mut(&coord) {
-        for (i, tile) in c.grid.iter_mut().enumerate() {
-            for (index, layer) in tile.layers.iter_mut().enumerate() {
-                if layer.tile == Tile::Air {
-                    continue;
-                }
-                let entity = layer
-                    .entity
-                    .unwrap_or_else(|| commands.spawn().insert(*layer).id());
-
-                let [a, b]: [u32; 2] = morton_decode(i as u64);
-
-                commands
-                    .entity(entity)
-                    //.insert(Parent(parent))
-                    .insert_bundle(SpriteSheetBundle {
-                        sprite: TextureAtlasSprite {
-                            color: layer.tint,
-                            index: u16::from(layer.tile) as usize,
-                            flip_x: layer.flip.contains(Flip::FLIP_H),
-                            flip_y: layer.flip.contains(Flip::FLIP_V),
-                        },
-                        texture_atlas: sa.tile_texture.clone(),
-                        transform: Transform::from_translation(Vec3::new(
-                            (a + coord.x as u32) as f32 * (TILE_SIZE as f32),
-                            (b + coord.y as u32) as f32 * (TILE_SIZE as f32),
-                            index as f32,
-                        )),
-                        ..Default::default()
-                    });
+    for (i, tile) in c.grid.iter_mut().enumerate() {
+        for (index, layer) in tile.layers.iter_mut().enumerate() {
+            if layer.tile == Tile::Air {
+                continue;
             }
+            let entity = layer
+                .entity
+                .unwrap_or_else(|| commands.spawn().insert(*layer).id());
+
+            let [a, b]: [u32; 2] = morton_decode(i as u64);
+
+            commands
+                .entity(entity)
+                //.insert(Parent(parent))
+                .insert_bundle(SpriteSheetBundle {
+                    sprite: TextureAtlasSprite {
+                        color: layer.tint,
+                        index: u16::from(layer.tile) as usize,
+                        flip_x: layer.flip.contains(Flip::FLIP_H),
+                        flip_y: layer.flip.contains(Flip::FLIP_V),
+                    },
+                    texture_atlas: sa.tile_texture.clone(),
+                    transform: Transform::from_translation(Vec3::new(
+                        (a as f32 + coord.x as f32 * CHUNK_SIZE as f32) * (TILE_SIZE as f32),
+                        (b as f32 + coord.y as f32 * CHUNK_SIZE as f32) * (TILE_SIZE as f32),
+                        index as f32,
+                    )),
+                    ..Default::default()
+                });
         }
     }
 }
@@ -438,26 +219,206 @@ pub fn chunk_load_unload(
             let (must_make, must_delete) = map.get_changes(view.view);
             for coord in must_make.iter() {
                 let mut chunk = Chunk::air();
-                generate_island(&mut chunk, &mut map.gen.rng);
+                //generate_island(&mut chunk, &mut map.gen.rng);
+                gen_chunk(&mut chunk, *coord, &mut map.gen);
+                load(&mut chunk, &mut commands, &sa, *coord, entity);
                 map.chunks.insert(*coord, chunk);
-                println!("loading chunk {}", *coord);
-                for zone in map.gen.zones_in_chunk(*coord) {
-                    //map.generate_zone(zone);
-                }
-                load(
-                    &mut map,
-                    &mut commands,
-                    &sa,
-                    *coord * (CHUNK_SIZE as i32),
-                    entity,
-                );
             }
 
             for coord in must_delete.iter() {
-                if let Some(mut chunk) = map.chunks.get_mut(coord) {
+                if let Some(chunk) = map.chunks.get_mut(coord) {
                     unload(chunk, &mut commands)
                 }
             }
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+enum Feature {
+    Run(u32),
+    Hills(u32),
+    ItemBoxes(u32, u32, Option<BoxPiece>),
+    Air,
+}
+
+impl From<Feature> for u32 {
+    fn from(f: Feature) -> u32 {
+        match f {
+            Feature::Run(h) => h,
+            Feature::Hills(h) => h,
+            Feature::ItemBoxes(h, _, _) => h,
+            Feature::Air => 0,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+struct Kind {
+    theme: TerrainTheme,
+    feature: Feature,
+}
+
+fn sample_basic_height(p: Place, g: &mut Gen) -> u32 {
+    (12.0 * g.terrain.get([p.x as f64 * 0.04, 0.0]).abs() + 1.0) as u32
+}
+
+fn sample_zone_center(p: Place, g: &mut Gen) -> Place {
+    let range = g.zone.get([p.x as f64 * 0.1, p.y as f64 * 0.1]);
+    let left = g.zone.get([p.x as f64 * 0.1 - range, p.y as f64 * 0.1]);
+    let right = g.zone.get([p.x as f64 * 0.1 + range, p.y as f64 * 0.1]);
+    let sign = if left > right { -1.0 } else { 1.0 };
+    let zone_start = p.x as f64 + sign * range;
+    Place::new(zone_start as i32, p.y)
+}
+
+fn sample_thematic(p: Place, g: &mut Gen) -> f64 {
+    let rate = 0.008;
+    g.theme.get([p.x as f64 * rate, p.y as f64 * rate])
+}
+
+fn sample_random(p: Place, g: &mut Gen) -> f64 {
+    let rate = 1.0;
+    g.theme.get([p.x as f64 * rate, p.y as f64 * rate])
+}
+
+fn sample_theme(p: Place, g: &mut Gen) -> TerrainTheme {
+    let theme = sample_thematic(p, g);
+    [
+        TerrainTheme::Grass,
+        TerrainTheme::Dirt,
+        TerrainTheme::Sand,
+        TerrainTheme::Stone,
+        TerrainTheme::Castle,
+        TerrainTheme::Metal,
+        TerrainTheme::Stone,
+        TerrainTheme::Snow,
+        TerrainTheme::Tundra,
+        TerrainTheme::Cake,
+        TerrainTheme::Choco,
+    ][((theme + 1.0) / 2.0 * 11.0) as usize]
+}
+
+fn sample_kind(p: Place, g: &mut Gen) -> Kind {
+    if p.y != 0 {
+        return Kind {
+            theme: TerrainTheme::Grass,
+            feature: Feature::Air,
+        };
+    }
+
+    let zc = sample_zone_center(p, g);
+    let theme = sample_theme(zc, g);
+    let height = sample_basic_height(zc, g);
+
+    let s = ((sample_thematic(zc, g).abs() * 3.0) % 3.0) as u32;
+
+    if s == 0 {
+        Kind {
+            theme,
+            feature: Feature::Run(height as u32),
+        }
+    } else if s == 1 {
+        Kind {
+            theme,
+            feature: Feature::Hills(height as u32),
+        }
+    } else {
+        let k = ((sample_random(zc, g).abs() * 10.0) % 10.0) as u32;
+        dbg!(k);
+        let bt = match k {
+            0 => Some(BoxPiece::Item { used: false }),
+            1 => Some(BoxPiece::Coin { used: false }),
+            2 | 3 => Some(BoxPiece::Crate),
+            _ => None,
+        };
+
+        Kind {
+            theme,
+            feature: Feature::ItemBoxes(height as u32, height as u32 + 4, bt),
+        }
+    }
+}
+
+fn gen_chunk(c: &mut Chunk, p: Place, g: &mut Gen) {
+    let mut kinds = Vec::new();
+    for i in -1..(CHUNK_SIZE as i32 + 1) {
+        kinds.push(sample_kind(p * CHUNK_SIZE as i32 + i * Place::X, g));
+    }
+
+    #[derive(Clone, Copy, Debug)]
+    enum Top {
+        TSlope(Slope),
+        TGround,
+        TLedge(u32),
+    }
+
+    let mut top = Vec::new();
+    for (x0, x1, x2) in kinds.iter().copied().tuple_windows() {
+        let x0 = u32::from(x0.feature);
+        let x1 = u32::from(x1.feature);
+        let x2 = u32::from(x2.feature);
+
+        use Top::*;
+        if x0 == x2 && x0 > x1 {
+            top.push(TLedge(x0));
+        } else if x0 == x1 + 1 {
+            top.push(TSlope(Slope::DownLeft));
+        } else if x1 + 1 == x2 {
+            top.push(TSlope(Slope::UpRight));
+        } else {
+            top.push(TGround)
+        }
+    }
+
+    for (i, info) in kinds[1..=CHUNK_SIZE].iter().copied().enumerate() {
+        match info.feature {
+            Feature::Run(h) => {
+                for y in 0..h {
+                    c[(i as u32, y)].layers[1].tile = Tile::Ground(Terrain::Interior, info.theme)
+                }
+                if h > 0 {
+                    c[(i as u32, h - 1)].layers[1].tile =
+                        Tile::Ground(Terrain::Ground(LMR::M), info.theme)
+                }
+            }
+            Feature::Hills(h) => {
+                for y in 0..h {
+                    c[(i as u32, y)].layers[1].tile = Tile::Ground(Terrain::Interior, info.theme)
+                }
+                match top[i as usize] {
+                    Top::TSlope(s) => {
+                        c[(i as u32, h)].layers[1].tile =
+                            Tile::Ground(Terrain::SlopeInt(s), info.theme);
+                        if h < CHUNK_SIZE as u32 + 1 {
+                            c[(i as u32, h + 1)].layers[1].tile =
+                                Tile::Ground(Terrain::Slope(s), info.theme);
+                        }
+                    }
+                    Top::TGround => {
+                        c[(i as u32, h)].layers[1].tile =
+                            Tile::Ground(Terrain::Ground(LMR::M), info.theme)
+                    }
+                    Top::TLedge(k) => {
+                        c[(i as u32, h)].layers[1].tile =
+                            Tile::Ground(Terrain::Ground(LMR::M), info.theme);
+                        c[(i as u32, k + 1)].layers[1].tile = Tile::LogLedge;
+                    }
+                }
+            }
+            Feature::ItemBoxes(h, bh, box_type) => {
+                for y in 0..h {
+                    c[(i as u32, y)].layers[1].tile = Tile::Ground(Terrain::Interior, info.theme)
+                }
+                if h > 0 {
+                    c[(i as u32, h - 1)].layers[1].tile =
+                        Tile::Ground(Terrain::Ground(LMR::M), info.theme)
+                }
+                if let Some(box_type) = box_type {
+                    c[(i as u32, bh)].layers[1].tile = Tile::Box(box_type);
+                }
+            }
+            Feature::Air => {}
         }
     }
 }
