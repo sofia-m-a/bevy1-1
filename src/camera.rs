@@ -1,4 +1,5 @@
 use bevy::{
+    math::Vec3Swizzles,
     prelude::*,
     render::camera::{CameraProjection, OrthographicProjection},
 };
@@ -10,15 +11,12 @@ pub const ASPECT_Y: f32 = 3.0;
 
 #[derive(Clone, Copy, Component)]
 pub struct AttractCamera {
-    pub center: Vec2,
     pub radius_snap: f32,
     pub radius_attract: f32,
 }
 
 #[derive(Clone, Copy, Component)]
-pub struct CameraCenter {
-    pub center: Vec2,
-}
+pub struct CameraCenter;
 
 #[derive(Component)]
 pub struct SofiaCamera {
@@ -27,23 +25,23 @@ pub struct SofiaCamera {
 }
 
 pub fn camera_center(
-    centers: Query<&CameraCenter>,
-    attractors: Query<&AttractCamera>,
+    centers: Query<(&CameraCenter, &Transform), Without<Camera>>,
+    attractors: Query<(&AttractCamera, &Transform), Without<Camera>>,
     mut cam: Query<(&mut Transform, &mut OrthographicProjection), With<Camera>>,
 ) {
-    let center_mean = centers
-        .iter()
-        .fold((Vec2::ZERO, 0.0), |(c, n), v| (c + v.center, n + 1.0));
+    let center_mean = centers.iter().fold((Vec2::ZERO, 0.0), |(c, n), v| {
+        (c + v.1.translation.xy(), n + 1.0)
+    });
     let center_mean = center_mean.0 / center_mean.1;
 
     let camera_center = attractors
         .iter()
         .map(|a| {
-            let distance2 = (a.center - center_mean).length_squared();
-            let attraction = f32::max(0.0, distance2 - a.radius_attract * a.radius_attract);
-            let snap = f32::max(0.0, distance2 - a.radius_snap * a.radius_snap);
+            let distance2 = (a.1.translation.xy() - center_mean).length_squared();
+            let attraction = f32::max(0.0, distance2 - a.0.radius_attract * a.0.radius_attract);
+            let snap = f32::max(0.0, distance2 - a.0.radius_snap * a.0.radius_snap);
             let weight = -(attraction + snap * snap * snap);
-            weight * a.center
+            weight * a.1.translation.xy()
         })
         .fold((Vec2::ZERO, 1.0), |(c, n), v| (c + v, n + 1.0));
     let camera_center = (camera_center.0 + center_mean) / camera_center.1;

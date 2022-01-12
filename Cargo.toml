@@ -6,24 +6,28 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-bevy = { version = "0.5.0", features = ["dynamic"] }
-# bevy_easings = "0.4.1"
+bevy = { version = "0.6.0", features = ["dynamic"] }
+# bevy_ecs_tilemap = { version = "0.5.0" }
+bevy_easings = "0.5.0"
 # bevy_loading = "0.1.2"
-# bevy_rapier2d = { version = "0.11.0", features = [ "simd-nightly" ] }
-# benimator = "0.3.1"
-# big-brain = "0.8.0"
+# bevy_rapier2d = { version = "0.12.0", features = [ "simd-nightly" ] }
+benimator = "1.0.0"
+big-brain = "0.9.0"
 bitflags = "1.3.2"
 extent = "0.2.0"
+heron = { version = "1.0.1-rc.1", features = ["2d"] }
 itertools = "0.10.3"
 lindel = "0.1.1"
 noise = "0.7.0"
 num-traits = "0.2.14"
+petgraph = "0.6.0"
 rand = "0.8.4"
 rand_pcg = "0.3.1"
 
 # bleeding-edge bevy
 [patch.crates-io]
-bevy = { git = "https://github.com/bevyengine/bevy", rev = "1d0d8a3397bd6fc2c14d42ffd0668d2443748912" }
+# bevy = { git = "https://github.com/bevyengine/bevy", rev = "458cb7a9e93dab3127bb99ce7bf8cfc3af18851d" }
+# bevy_ecs_tilemap = { git = "https://github.com/StarArawn/bevy_ecs_tilemap", rev = "a1255a77473f659d4be644bf7c17e30901a16279" }
 
 # Enable optimizations for dependencies (incl. Bevy), but not for our code:
 [profile.dev.package."*"]

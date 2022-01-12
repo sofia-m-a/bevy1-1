@@ -1,4 +1,5 @@
 pub mod brushes;
+pub mod level_graph;
 
 use crate::{
     assets::{SpriteAssets, TILE_SIZE},
@@ -9,6 +10,7 @@ use bevy::{
     math::{IVec2, Rect, Vec3},
     prelude::*,
 };
+use bevy_rapier2d::prelude::*;
 use itertools::Itertools;
 use noise::{NoiseFn, Seedable};
 use rand::prelude::*;
@@ -128,19 +130,27 @@ pub fn chunk_loader(
 
                 let id = commands
                     .spawn()
-                    .insert_bundle(SpriteSheetBundle {
-                        sprite: TextureAtlasSprite {
-                            index: u16::from(*t) as usize,
-                            ..Default::default()
-                        },
-                        texture_atlas: sa.tile_texture.clone(),
-                        transform: Transform::from_translation(Vec3::new(
-                            p.x as f32 * TILE_SIZE as f32,
-                            p.y as f32 * TILE_SIZE as f32,
-                            1 as f32,
+                    // .insert_bundle(SpriteSheetBundle {
+                    //     sprite: TextureAtlasSprite {
+                    //         index: u16::from(*t) as usize,
+                    //         ..Default::default()
+                    //     },
+                    //     texture_atlas: sa.tile_texture.clone(),
+                    //     transform: Transform::from_translation(Vec3::new(
+                    //         p.x as f32 * TILE_SIZE as f32,
+                    //         p.y as f32 * TILE_SIZE as f32,
+                    //         1 as f32,
+                    //     )),
+                    //     ..Default::default()
+                    // })
+                    .insert_bundle(ColliderBundle {
+                        shape: ColliderShapeComponent(ColliderShape::cuboid(0.5, 0.5)),
+                        position: ColliderPositionComponent(ColliderPosition(
+                            Isometry::translation(p.x as f32, p.y as f32),
                         )),
                         ..Default::default()
                     })
+                    .insert(ColliderDebugRender::with_id(3))
                     .id();
                 children.push(id);
             }
@@ -201,7 +211,7 @@ fn gen(p: Place, g: &mut Gen) -> Vec<(Place, Tile)> {
                 }
                 if h > 0 {
                     c.push((
-                        Place::new(i as i32, (h - 1) as i32),
+                        Place::new(i as i32, h as i32),
                         Tile::Ground(Terrain::Ground(LMR::M), info.theme),
                     ));
                 }
@@ -250,7 +260,7 @@ fn gen(p: Place, g: &mut Gen) -> Vec<(Place, Tile)> {
                 }
                 if h > 0 {
                     c.push((
-                        Place::new(i as i32, (h - 1) as i32),
+                        Place::new(i as i32, h as i32),
                         Tile::Ground(Terrain::Ground(LMR::M), info.theme),
                     ));
                 }

@@ -1,3 +1,6 @@
+use std::time::Duration;
+
+use benimator::{Frame, SpriteSheetAnimation};
 use bevy::{prelude::*, render::render_resource::TextureUsages};
 
 pub const TILE_SIZE: u32 = 70;
@@ -5,14 +8,47 @@ pub const SHEET_W: u16 = 27;
 pub const SHEET_H: u16 = 35;
 pub struct SpriteAssets {
     pub tile_texture: Handle<TextureAtlas>,
+    pub p1_texture: Handle<TextureAtlas>,
+    pub walk_animation: Handle<SpriteSheetAnimation>,
 }
 
 pub fn setup_sprites(
     mut commands: Commands,
     assets: Res<AssetServer>,
     mut atlases: ResMut<Assets<TextureAtlas>>,
+    mut animations: ResMut<Assets<SpriteSheetAnimation>>,
 ) {
     let texture_handle = assets.load("tilesheet.png");
+
+    let p1_handle: Handle<Image> =
+        assets.load("Platformer Art Complete Pack/Base pack/Player/p1_spritesheet.png");
+    let p2_handle: Handle<Image> =
+        assets.load("Platformer Art Complete Pack/Base pack/Player/p2_spritesheet.png");
+    let p3_handle: Handle<Image> =
+        assets.load("Platformer Art Complete Pack/Base pack/Player/p3_spritesheet.png");
+
+    let mut player_atlas = TextureAtlas::new_empty(p1_handle, Vec2::new(508.0, 288.0));
+
+    for &[x, y, w, h] in [
+        P1_DUCK, P1_FRONT, P1_HURT, P1_JUMP, P1_STAND, P1_WALK01, P1_WALK02, P1_WALK03, P1_WALK04,
+        P1_WALK05, P1_WALK06, P1_WALK07, P1_WALK08, P1_WALK09, P1_WALK10, P1_WALK11,
+    ]
+    .iter()
+    {
+        player_atlas.add_texture(bevy::sprite::Rect {
+            min: Vec2::new(x as f32, y as f32),
+            max: Vec2::new((x + w) as f32, (y + h) as f32),
+        });
+    }
+
+    let walk_animation = SpriteSheetAnimation::from_frames(
+        (5..=15)
+            .map(|r| Frame {
+                duration: Duration::from_millis(100),
+                index: r,
+            })
+            .collect(),
+    );
 
     commands.insert_resource(SpriteAssets {
         tile_texture: atlases.add(TextureAtlas::from_grid(
@@ -21,8 +57,27 @@ pub fn setup_sprites(
             SHEET_W as usize,
             SHEET_H as usize,
         )),
+        p1_texture: atlases.add(player_atlas),
+        walk_animation: animations.add(walk_animation),
     });
 }
+
+const P1_DUCK: [u32; 4] = [365, 98, 69, 71];
+const P1_FRONT: [u32; 4] = [0, 196, 66, 92];
+const P1_HURT: [u32; 4] = [438, 0, 69, 92];
+const P1_JUMP: [u32; 4] = [438, 93, 67, 94];
+const P1_STAND: [u32; 4] = [67, 196, 66, 92];
+pub const P1_WALK01: [u32; 4] = [0, 0, 72, 97];
+const P1_WALK02: [u32; 4] = [73, 0, 72, 97];
+const P1_WALK03: [u32; 4] = [146, 0, 72, 97];
+const P1_WALK04: [u32; 4] = [0, 98, 72, 97];
+const P1_WALK05: [u32; 4] = [73, 98, 72, 97];
+const P1_WALK06: [u32; 4] = [146, 98, 72, 97];
+const P1_WALK07: [u32; 4] = [219, 0, 72, 97];
+const P1_WALK08: [u32; 4] = [292, 0, 72, 97];
+const P1_WALK09: [u32; 4] = [219, 98, 72, 97];
+const P1_WALK10: [u32; 4] = [365, 0, 72, 97];
+const P1_WALK11: [u32; 4] = [292, 98, 72, 97];
 
 pub fn set_texture_filters_to_nearest(
     mut texture_events: EventReader<AssetEvent<Image>>,
