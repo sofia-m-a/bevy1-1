@@ -1,4 +1,7 @@
+use bevy::math::IVec2;
 use extent::Extent;
+use itertools::iproduct;
+use noise::NoiseFn;
 use rand::{prelude::SliceRandom, Rng};
 use rand_pcg::Pcg64;
 
@@ -228,6 +231,8 @@ pub enum Tile {
 }
 use Tile::*;
 
+use super::{Chunk, Gen};
+
 impl From<Tile> for u16 {
     fn from(t: Tile) -> u16 {
         match t {
@@ -242,181 +247,3 @@ impl From<Tile> for u16 {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
-pub struct BrushSize {
-    w: Extent<u32>,
-    h: Extent<u32>,
-}
-
-// #[derive(Clone, Debug)]
-// pub enum Plan {
-//     VStack(Vec<Plan>),
-//     HStack(Vec<Plan>),
-//     Choice(Vec<Plan>),
-//     Constant((u32, u32), Vec<Tile>),
-// }
-// use Plan::*;
-
-// pub fn run_plan(
-//     p: Plan,
-//     c: &mut Chunk,
-//     r: &mut Pcg64,
-//     center: (u32, u32),
-//     layer: usize,
-// ) -> BrushSize {
-//     match p {
-//         VStack(vs) => {
-//             let mut end = center.1;
-//             let mut w = Extent::empty();
-//             for plan in vs {
-//                 let center = (center.0, end);
-//                 let new = run_plan(plan, c, r, center, layer);
-//                 dbg!(w, new.w, w.union(new.w));
-//                 end += new.h.len();
-//                 w = w.union(new.w);
-//                 //println!("V: {:?} {:?} {:?} {:?}", end, w, center, new);
-//             }
-
-//             BrushSize {
-//                 h: Extent::new(center.1, end - 1),
-//                 w,
-//             }
-//         }
-//         HStack(hs) => {
-//             let mut end = center.0;
-//             let mut h = Extent::empty();
-//             for plan in hs {
-//                 let center = (end, center.1);
-//                 let new = run_plan(plan, c, r, center, layer);
-//                 dbg!(h, new.h, h.union(new.h));
-//                 end += new.w.len();
-//                 h = h.union(new.h);
-//                 //println!("H: {:?} {:?} {:?} {:?}", end, h, center, new);
-//             }
-
-//             BrushSize {
-//                 w: Extent::new(center.1, end - 1),
-//                 h,
-//             }
-//         }
-//         Choice(options) => {
-//             let option = options.choose(r);
-//             if let Some(o) = option {
-//                 run_plan(o.clone(), c, r, center, layer)
-//             } else {
-//                 BrushSize {
-//                     w: Extent::empty(),
-//                     h: Extent::empty(),
-//                 }
-//             }
-//         }
-//         Constant(size, tile) => {
-//             let size = BrushSize {
-//                 w: (center.0..center.0 + size.0).into(),
-//                 h: (center.1..center.1 + size.1).into(),
-//             };
-//             for i in size.w.iter() {
-//                 for j in size.h.iter() {
-//                     c[(i, j)].tile = *tile.choose(r).unwrap();
-//                 }
-//             }
-//             size
-//         }
-//     }
-// }
-
-// pub fn igloo(size: (u32, u32), r: &mut Pcg64) -> Plan {
-//     let door = r.gen_range(0..size.0);
-
-//     Plan::VStack(vec![
-//         Plan::HStack(vec![
-//             Plan::Constant(
-//                 (door, 1),
-//                 vec![Igloo(IglooPiece::Interior), Igloo(IglooPiece::InteriorAlt)],
-//             ),
-//             Plan::Constant((1, 1), vec![Igloo(IglooPiece::Door)]),
-//             Plan::Constant(
-//                 (size.0 - door - 1, 1),
-//                 vec![Igloo(IglooPiece::Interior), Igloo(IglooPiece::InteriorAlt)],
-//             ),
-//         ]),
-//         Plan::Constant(
-//             (size.0, size.0 - 2),
-//             vec![Igloo(IglooPiece::Interior), Igloo(IglooPiece::InteriorAlt)],
-//         ),
-//         Plan::HStack(vec![
-//             Plan::Constant((1, 1), vec![Igloo(IglooPiece::Top(LMR::L))]),
-//             Plan::Constant((size.0 - 2, 1), vec![Igloo(IglooPiece::Top(LMR::M))]),
-//             Plan::Constant((1, 1), vec![Igloo(IglooPiece::Top(LMR::R))]),
-//         ]),
-//     ])
-// }
-
-// pub fn pine_tree(snow: bool, trunk_height: u32, leaf_height: u32) -> Plan {
-//     VStack(vec![
-//         HStack(vec![
-//             Constant((1, 1), vec![Tile::Air]),
-//             Constant(
-//                 (1, 1),
-//                 if snow {
-//                     vec![
-//                         Tile::Trunk(TreeTrunkPiece::Base),
-//                         Tile::Trunk(TreeTrunkPiece::BaseNarrow),
-//                         Tile::Trunk(TreeTrunkPiece::BaseSnow),
-//                         Tile::Trunk(TreeTrunkPiece::BaseSnowPile),
-//                     ]
-//                 } else {
-//                     vec![
-//                         Tile::Trunk(TreeTrunkPiece::Base),
-//                         Tile::Trunk(TreeTrunkPiece::BaseNarrow),
-//                     ]
-//                 },
-//             ),
-//         ]),
-//         Choice(vec![
-//             HStack(vec![
-//                 Constant(
-//                     (1, 1),
-//                     vec![Tile::Tree(TreePiece::PineBranch {
-//                         snow,
-//                         double: false,
-//                         lr: LR::L,
-//                     })],
-//                 ),
-//                 Constant((1, 1), vec![Tile::Tree(TreePiece::PineTrunk)]),
-//                 Constant(
-//                     (1, 1),
-//                     vec![Tile::Tree(TreePiece::PineBranch {
-//                         snow,
-//                         double: false,
-//                         lr: LR::R,
-//                     })],
-//                 ),
-//             ]),
-//             HStack(vec![
-//                 Constant(
-//                     (1, 1),
-//                     vec![Tile::Tree(TreePiece::PineBranch {
-//                         snow,
-//                         double: true,
-//                         lr: LR::L,
-//                     })],
-//                 ),
-//                 Constant((1, 1), vec![Tile::Tree(TreePiece::PineTrunk)]),
-//                 Constant(
-//                     (1, 1),
-//                     vec![Tile::Tree(TreePiece::PineBranch {
-//                         snow,
-//                         double: true,
-//                         lr: LR::R,
-//                     })],
-//                 ),
-//             ]),
-//         ]),
-//         HStack(vec![
-//             Constant((1, 1), vec![Tile::Air]),
-//             Constant((1, 1), vec![Tile::Tree(TreePiece::Top { snow })]),
-//             Constant((1, 1), vec![Tile::Air]),
-//         ]),
-//     ])
-// }

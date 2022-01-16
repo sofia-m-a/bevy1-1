@@ -1,4 +1,5 @@
 pub mod brushes;
+pub mod brushes2;
 pub mod level_graph;
 
 use crate::{
@@ -130,19 +131,19 @@ pub fn chunk_loader(
 
                 let id = commands
                     .spawn()
-                    // .insert_bundle(SpriteSheetBundle {
-                    //     sprite: TextureAtlasSprite {
-                    //         index: u16::from(*t) as usize,
-                    //         ..Default::default()
-                    //     },
-                    //     texture_atlas: sa.tile_texture.clone(),
-                    //     transform: Transform::from_translation(Vec3::new(
-                    //         p.x as f32 * TILE_SIZE as f32,
-                    //         p.y as f32 * TILE_SIZE as f32,
-                    //         1 as f32,
-                    //     )),
-                    //     ..Default::default()
-                    // })
+                    .insert_bundle(SpriteSheetBundle {
+                        sprite: TextureAtlasSprite {
+                            index: u16::from(*t) as usize,
+                            ..Default::default()
+                        },
+                        texture_atlas: sa.tile_texture.clone(),
+                        transform: Transform::from_translation(Vec3::new(
+                            p.x as f32 * TILE_SIZE as f32,
+                            p.y as f32 * TILE_SIZE as f32,
+                            1 as f32,
+                        )),
+                        ..Default::default()
+                    })
                     .insert_bundle(ColliderBundle {
                         shape: ColliderShapeComponent(ColliderShape::cuboid(0.5, 0.5)),
                         position: ColliderPositionComponent(ColliderPosition(
@@ -150,7 +151,6 @@ pub fn chunk_loader(
                         )),
                         ..Default::default()
                     })
-                    .insert(ColliderDebugRender::with_id(3))
                     .id();
                 children.push(id);
             }

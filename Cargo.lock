@@ -221,10 +221,10 @@ dependencies = [
  "benimator",
  "bevy",
  "bevy_easings",
+ "bevy_rapier2d",
  "big-brain",
  "bitflags",
  "extent",
- "heron",
  "itertools",
  "lindel",
  "noise",
@@ -545,6 +545,17 @@ dependencies = [
  "bevy_window",
  "bitflags",
  "bytemuck",
+]
+
+[[package]]
+name = "bevy_rapier2d"
+version = "0.12.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bc683f8957625c85f1617a9bf0227b1263d3f502c104c5079c74a196d53ca1fc"
+dependencies = [
+ "bevy",
+ "nalgebra",
+ "rapier2d",
 ]
 
 [[package]]
@@ -1376,16 +1387,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9ea835d29036a4087793836fa931b08837ad5e957da9e23886b29586fb9b6650"
 
 [[package]]
-name = "duplicate"
-version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3cdaf23abc9bcc47fda1ae3af68425a22b4dfbd745f9077be0eaad5320f75f52"
-dependencies = [
- "heck",
- "proc-macro-error",
-]
-
-[[package]]
 name = "either"
 version = "1.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1729,70 +1730,12 @@ dependencies = [
 ]
 
 [[package]]
-name = "heck"
-version = "0.3.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "87cbf45460356b7deeb5e3415b5563308c0a9b057c85e12b06ad551f98d0a6ac"
-dependencies = [
- "unicode-segmentation",
-]
-
-[[package]]
 name = "hermit-abi"
 version = "0.1.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "62b467343b94ba476dcb2500d242dadbb39557df889310ac77c5d99100aaac33"
 dependencies = [
  "libc",
-]
-
-[[package]]
-name = "heron"
-version = "1.0.1-rc.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7b54cff12c61097232cdfdf2d13f3144cf40898638cc20cdbc904cd5b2ea26c8"
-dependencies = [
- "bevy",
- "cfg_aliases",
- "heron_core",
- "heron_macros",
- "heron_rapier",
-]
-
-[[package]]
-name = "heron_core"
-version = "1.0.1-rc.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5086227ae151396f568e4408747a82d68ce9c9290581c85c84d2346aedfee70f"
-dependencies = [
- "bevy",
- "cfg_aliases",
- "duplicate",
-]
-
-[[package]]
-name = "heron_macros"
-version = "1.0.1-rc.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f7b9b7b8eb63f3bc804a749c2194b0e0237fe5a07d1abc3cef79db78cd8e7f96"
-dependencies = [
- "heron_core",
- "quote",
- "syn",
-]
-
-[[package]]
-name = "heron_rapier"
-version = "1.0.1-rc.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6b1caadd2ce5b4da2df95129071f84325144db54310de89ee40bc9e171a9eec6"
-dependencies = [
- "bevy",
- "cfg_aliases",
- "crossbeam",
- "fnv",
- "heron_core",
- "rapier2d",
 ]
 
 [[package]]
@@ -2050,6 +1993,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7fc7aa29613bd6a620df431842069224d8bc9011086b1db4c0e0cd47fa03ec9a"
 
 [[package]]
+name = "libm"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c7d73b3f436185384286bd8098d17ec07c9a7d2388a6599f824d8502b529702a"
+
+[[package]]
 name = "libudev-sys"
 version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2254,11 +2203,12 @@ dependencies = [
 
 [[package]]
 name = "nalgebra"
-version = "0.29.0"
+version = "0.30.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d506eb7e08d6329505faa8a3a00a5dcc6de9f76e0c77e4b75763ae3c770831ff"
+checksum = "4fb2d0de08694bed883320212c18ee3008576bfe8c306f4c3c4a58b4876998be"
 dependencies = [
  "approx",
+ "glam",
  "matrixmultiply",
  "nalgebra-macros",
  "num-complex 0.4.0",
@@ -2582,6 +2532,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9a64b1ec5cda2586e284722486d802acf1f7dbdc623e2bfc57e65ca1cd099290"
 dependencies = [
  "autocfg",
+ "libm 0.2.1",
 ]
 
 [[package]]
@@ -2683,6 +2634,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "packed_simd_2"
+version = "0.3.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "71c0c06716cfc81616fa8e22b721ce92fecd594508bc0eb3d04ae3ef35ac10c5"
+dependencies = [
+ "cfg-if 0.1.10",
+ "libm 0.1.4",
+]
+
+[[package]]
 name = "parking"
 version = "2.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2715,9 +2676,9 @@ dependencies = [
 
 [[package]]
 name = "parry2d"
-version = "0.7.1"
+version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0e03714e76fd6708c1fa3fc4f58a66dabd723bb87865548657a037beaf9a8eea"
+checksum = "65289d4e196cfaca6643766c0d7288997f3b4cee99eba4cdcc28c1dcb8bf2450"
 dependencies = [
  "approx",
  "arrayvec",
@@ -2817,30 +2778,6 @@ checksum = "1ebace6889caf889b4d3f76becee12e90353f2b8c7d875534a71e5742f8f6f83"
 dependencies = [
  "thiserror",
  "toml",
-]
-
-[[package]]
-name = "proc-macro-error"
-version = "1.0.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "da25490ff9892aab3fcf7c36f08cfb902dd3e71ca0f9f9517bea02a73a5ce38c"
-dependencies = [
- "proc-macro-error-attr",
- "proc-macro2",
- "quote",
- "syn",
- "version_check",
-]
-
-[[package]]
-name = "proc-macro-error-attr"
-version = "1.0.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a1be40180e52ecc98ad80b184934baf3d0d29f979574e439af5a55274b35f869"
-dependencies = [
- "proc-macro2",
- "quote",
- "version_check",
 ]
 
 [[package]]
@@ -2974,9 +2911,9 @@ checksum = "63e935c45e09cc6dcf00d2f0b2d630a58f4095320223d47fc68918722f0538b6"
 
 [[package]]
 name = "rapier2d"
-version = "0.11.1"
+version = "0.12.0-alpha.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c45d2910dbd279941b71ef9d20da877a0eada21f8117fcac70941e458100ea86"
+checksum = "1a6021de6639dc443533d99efdaf595f39122ad77bf31306ba1bc18abd361301"
 dependencies = [
  "approx",
  "arrayvec",
@@ -2991,6 +2928,7 @@ dependencies = [
  "parry2d",
  "rustc-hash",
  "simba",
+ "vec_map",
 ]
 
 [[package]]
@@ -3232,13 +3170,14 @@ checksum = "7fdf1b9db47230893d76faad238fd6097fd6d6a9245cd7a4d90dbd639536bbd2"
 
 [[package]]
 name = "simba"
-version = "0.6.0"
+version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f0b7840f121a46d63066ee7a99fc81dcabbc6105e437cae43528cea199b5a05f"
+checksum = "6fa406d0a270fc91831a28f705ba803ad05b971486af492317f1607390245b99"
 dependencies = [
  "approx",
  "num-complex 0.4.0",
  "num-traits",
+ "packed_simd_2",
  "paste",
  "wide",
 ]
@@ -3341,7 +3280,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7b0dc6d20ce137f302edf90f9cd3d278866fd7fb139efca6f246161222ad6d87"
 dependencies = [
  "lazy_static",
- "libm",
+ "libm 0.1.4",
 ]
 
 [[package]]
@@ -3530,12 +3469,6 @@ name = "typenum"
 version = "1.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dcf81ac59edc17cc8697ff311e8f5ef2d99fcbd9817b34cec66f90b6c3dfd987"
-
-[[package]]
-name = "unicode-segmentation"
-version = "1.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8895849a949e7845e06bd6dc1aa51731a103c42707010a5b591c0038fb73385b"
 
 [[package]]
 name = "unicode-width"

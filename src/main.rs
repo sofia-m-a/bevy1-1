@@ -1,22 +1,23 @@
 #![feature(int_abs_diff)]
 #![feature(bool_to_option)]
 
-use assets::{
-    set_texture_filters_to_nearest, setup_sprites, SpriteAssets, P1_WALK01, SHEET_H, SHEET_W,
-    TILE_SIZE,
-};
+use assets::{set_texture_filters_to_nearest, setup_sprites, SpriteAssets, P1_WALK01, TILE_SIZE};
 use benimator::{AnimationPlugin, Play};
 use bevy::{
     prelude::*,
     render::{options::WgpuOptions, render_resource::WgpuLimits},
 };
-use heron::prelude::*;
+use bevy_rapier2d::prelude::*;
 
 mod assets;
 mod camera;
 mod map;
 use camera::*;
+use extent::Extent;
 use map::{chunk_loader, level_graph::debug_graph, Gen};
+use rand_pcg::Pcg64;
+
+use crate::map::brushes2;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
 enum GameState {
@@ -26,6 +27,10 @@ enum GameState {
 
 fn main() {
     //debug_graph();
+    println!(
+        "{:?}",
+        brushes2::igloo(Extent::new(0, 10), 4, &mut Pcg64::new(1, 2))
+    );
 
     App::new()
         .insert_resource(WgpuOptions {
@@ -66,7 +71,6 @@ fn update_clear_colour(mut app_state: ResMut<State<GameState>>) {
 struct Player;
 
 fn keyboard_input_system(
-    mut commands: Commands,
     mut player: Query<(&mut RigidBodyVelocityComponent, With<Player>)>,
     keyboard_input: Res<Input<KeyCode>>,
 ) {
@@ -141,10 +145,10 @@ fn setup_player(mut commands: Commands, graphics: Res<SpriteAssets>) {
 
     commands
         .spawn_bundle(SpriteSheetBundle {
-            texture_atlas: graphics.p1_texture.clone(),
+            texture_atlas: graphics.player_atlas.clone(),
             ..Default::default()
         })
-        .insert(graphics.walk_animation.clone())
+        .insert(graphics.p1_walk_animation.clone())
         .insert(Play)
         .insert_bundle(player_shape)
         .insert_bundle(player_body)
