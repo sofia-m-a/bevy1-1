@@ -1,14 +1,24 @@
+use std::collections::HashSet;
+
 use extent::Extent;
 use itertools::iproduct;
 use itertools::Itertools;
 use itertools::Position::*;
 use noise::NoiseFn;
 use noise::OpenSimplex;
+use noise::Seedable;
 use num_traits::PrimInt;
 use rand::distributions::uniform::SampleUniform;
+use rand::distributions::WeightedIndex;
+use rand::prelude::Distribution;
 use rand::prelude::SliceRandom;
+use rand::thread_rng;
 use rand::Rng;
+use rand::RngCore;
+use rand::SeedableRng;
 use rand_pcg::Pcg64;
+
+use crate::map::CHUNK_SIZE;
 
 use super::Place;
 
@@ -293,6 +303,8 @@ impl From<TreeTile> for Index {
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Tile {
+    Air,
+
     Terrain(Terrain, TerrainTile),
     MetalTri,
     MetalYellowSquare,
@@ -672,6 +684,8 @@ pub enum Tile {
 impl From<Tile> for Index {
     fn from(t: Tile) -> Self {
         match t {
+            Tile::Air => (12, 32),
+
             Tile::Terrain(t, tt) => {
                 let (x1, y1) = Index::from(t);
                 let (x2, y2) = Index::from(tt);
@@ -1089,18 +1103,119 @@ pub fn igloo(ground: Extent<i32>, height: i32, gen: &mut Pcg64) -> Vec<(Place, T
     }
     v
 }
+pub struct Gen {
+    pub zone: noise::Worley,
+    pub terrain: noise::OpenSimplex,
+    pub theme: noise::Value,
+    pub seed: u128,
+}
 
-pub fn slopey_ground(width: Extent<i32>, gen: &mut Pcg64, s: OpenSimplex) -> Vec<(Place, Tile)> {
-    let mut heights = Vec::new();
-    let mut v = Vec::new();
-    for i in width.iter() {
-        heights.push((i, 12.0 * s.get([i as f64 * 0.04, 0.0])));
+impl Gen {
+    pub fn new() -> Self {
+        let mut tr = thread_rng();
+        let mut rng = Pcg64::from_rng(&mut tr).unwrap();
+        let terrain = noise::OpenSimplex::new().set_seed(rng.next_u32());
+        let zone = noise::Worley::new()
+            .set_seed(rng.next_u32())
+            .set_range_function(noise::RangeFunction::Manhattan)
+            .enable_range(false);
+        let theme = noise::Value::new().set_seed(rng.next_u32());
+        let seed: u128 = rng.gen();
+
+        Self {
+            zone,
+            terrain,
+            theme,
+            seed,
+        }
     }
-    for (i, h) in heights {
-        for j in 0..h as i32 {
+}
+
+pub fn heightmap_ground(start: Place, gen: &mut Pcg64, s: OpenSimplex) -> Vec<(Place,Tile)> {
+    let mut heights = Vec::new();
+
+    let shift = |x| 1.0 + ((x + 1.0) / 2.0) * 10.0;
+
+    for i in 0..CHUNK_SIZE {
+        heights.push(shift(s.get([start.x as f64 + i as f64, start.y as f64])));
+    }
+    heights.push(2.0);
+    heights.push(10.0);
+
+    let mut v = Vec::new();
+    for (i, h) in heights.iter().copied().enumerate() {
+        let h_ = h.ceil() as usize;
+        for j in 0..h_ {
+            let tile = if j == h_ - 1 {
+                TerrainTile::BlockFace(LMR::M, TMB::T)
+            } else {
+                TerrainTile::BlockFace(LMR::M, TMB::M)
+            };
             v.push((
-                Place::new(i, j),
-                Tile::Terrain(Terrain::Dirt, TerrainTile::Jagged),
+                Place::new(start.x + i as i32, start.y + j as i32),
+                Tile::Terrain(Terrain::Dirt, tile),
+            ));
+        }
+    }
+
+    v
+}
+
+pub fn slopey_ground(start: Place, gen: &mut Pcg64, s: OpenSimplex) -> Vec<(Place, Tile)> {
+    #[derive(Clone, Copy, PartialEq, Eq)]
+    enum Angle {
+        A0,
+        A45,
+        A90,
+        N45,
+        N90,
+    }
+
+    let mut heights = Vec::new();
+    let mut height = 0;
+    let weights: WeightedIndex<usize> = WeightedIndex::new(&[15, 3, 1, 3, 1]).unwrap();
+
+    for _ in 0..=8 {
+        let length: usize = gen.gen_range(1..=5);
+        let angle =
+            [Angle::A0, Angle::A45, Angle::A90, Angle::N45, Angle::N90][weights.sample(gen)];
+
+        if heights.len() >= CHUNK_SIZE {
+            break;
+        }
+
+        for _ in 0..length {
+            height += match angle {
+                Angle::A0 => 0,
+                Angle::A45 => 1,
+                Angle::A90 => 3,
+                Angle::N45 => -1,
+                Angle::N90 => -3,
+            };
+            height = 0.max(height);
+            heights.push((height, angle));
+        }
+    }
+
+    let mut v = Vec::new();
+    for (i, (h, a)) in heights.iter().copied().enumerate() {
+        for j in 0..h {
+            let tile = if j == h - 1 {
+                match a {
+                    Angle::A45 => TerrainTile::Slope(LR::L),
+                    Angle::N45 => TerrainTile::Slope(LR::R),
+                    _ => TerrainTile::BlockFace(LMR::M, TMB::T),
+                }
+            } else if j == h - 2 && a == Angle::A45 {
+                TerrainTile::SlopeInt(LR::L)
+            } else if j == h - 2 && a == Angle::N45 {
+                TerrainTile::SlopeInt(LR::R)
+            } else {
+                TerrainTile::BlockFace(LMR::M, TMB::M)
+            };
+            v.push((
+                Place::new(start.x + i as i32, start.y + j),
+                Tile::Terrain(Terrain::Dirt, tile),
             ));
         }
     }

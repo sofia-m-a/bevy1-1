@@ -5,7 +5,7 @@ use bevy::{prelude::*, render::render_resource::TextureUsages};
 
 pub const TILE_SIZE: u32 = 70;
 pub const SHEET_W: u16 = 27;
-pub const SHEET_H: u16 = 35;
+pub const SHEET_H: u16 = 58;
 pub struct SpriteAssets {
     pub tile_texture: Handle<TextureAtlas>,
     pub player_atlas: Handle<TextureAtlas>,
@@ -18,7 +18,7 @@ pub fn setup_sprites(
     mut atlases: ResMut<Assets<TextureAtlas>>,
     mut animations: ResMut<Assets<SpriteSheetAnimation>>,
 ) {
-    let texture_handle = assets.load("tilesheet.png");
+    let texture_handle = assets.load("numbering.png");
 
     let p1_handle: Handle<Image> =
         assets.load("Platformer Art Complete Pack/Base pack/Player/p1_spritesheet.png");

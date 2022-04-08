@@ -18,7 +18,7 @@ pub struct AttractCamera {
 #[derive(Clone, Copy, Component)]
 pub struct CameraCenter;
 
-#[derive(Component)]
+#[derive(Debug, Component)]
 pub struct SofiaCamera {
     pub view: Rect<f32>,
     pub aspect_ratio: f32,

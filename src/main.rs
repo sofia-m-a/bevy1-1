@@ -14,7 +14,7 @@ mod camera;
 mod map;
 use camera::*;
 use extent::Extent;
-use map::{chunk_loader, level_graph::debug_graph, Gen};
+use map::{brushes2::Gen, chunk_loader, level_graph::debug_graph};
 use rand_pcg::Pcg64;
 
 use crate::map::brushes2;
@@ -27,10 +27,6 @@ enum GameState {
 
 fn main() {
     //debug_graph();
-    println!(
-        "{:?}",
-        brushes2::igloo(Extent::new(0, 10), 4, &mut Pcg64::new(1, 2))
-    );
 
     App::new()
         .insert_resource(WgpuOptions {
@@ -71,7 +67,11 @@ fn update_clear_colour(mut app_state: ResMut<State<GameState>>) {
 struct Player;
 
 fn keyboard_input_system(
-    mut player: Query<(&mut RigidBodyVelocityComponent, With<Player>)>,
+    mut player: Query<(
+        &mut RigidBodyVelocityComponent,
+        &RigidBodyMassPropsComponent,
+        With<Player>,
+    )>,
     keyboard_input: Res<Input<KeyCode>>,
 ) {
     let mut dir = Vec2::ZERO;
@@ -93,7 +93,7 @@ fn keyboard_input_system(
     }
 
     if let Some(mut p) = player.iter_mut().next() {
-        p.0 .0.linvel = (20.0 * dir).into();
+        p.0 .0.apply_impulse(&p.1, dir.into());
     }
 }
 
@@ -113,7 +113,7 @@ fn setup(
 
     // physics
     rapier.scale = TILE_SIZE as f32;
-    rapier.gravity = Vec2::new(0.0, -12.0).into();
+    rapier.gravity = Vec2::new(0.0, 0.0).into();
 
     // clear color for sky
     *color = ClearColor(SKY_COLOR);
@@ -135,11 +135,15 @@ fn setup_player(mut commands: Commands, graphics: Res<SpriteAssets>) {
             flags: RigidBodyMassPropsFlags::ROTATION_LOCKED,
             ..Default::default()
         }),
+        ccd: RigidBodyCcdComponent(RigidBodyCcd {
+            ccd_enabled: true,
+            ..Default::default()
+        }),
         ..Default::default()
     };
     let player_shape = ColliderBundle {
         collider_type: ColliderTypeComponent(ColliderType::Solid),
-        shape: ColliderShapeComponent(ColliderShape::cuboid(w as f32 / 2.0, h as f32 / 2.0)),
+        shape: ColliderShapeComponent(ColliderShape::cuboid(w as f32 * 0.5, h as f32 * 0.5)),
         ..Default::default()
     };
 
@@ -154,5 +158,6 @@ fn setup_player(mut commands: Commands, graphics: Res<SpriteAssets>) {
         .insert_bundle(player_body)
         .insert(RigidBodyPositionSync::Discrete)
         .insert(CameraCenter)
+        //.insert(ColliderDebugRender { color: Color::RED })
         .insert(Player);
 }

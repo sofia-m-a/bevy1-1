@@ -1,3 +1,4 @@
+
 {
   description = "bevy1-1";
 
@@ -24,9 +25,9 @@
             alsaLib
             udev
             vulkan-loader
-            wayland
             libxkbcommon 
           ]}"'';
+          #  wayland
 
           buildInputs = [
             (rust-bin.selectLatestNightlyWith (toolchain: toolchain.default.override {
@@ -40,7 +41,7 @@
             xorg.libXcursor
             xorg.libXrandr
             xorg.libXi
-            vulkan-tools
+            #vulkan-tools
             vulkan-headers
             vulkan-loader
             vulkan-validation-layers
