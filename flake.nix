@@ -37,7 +37,7 @@
             pkgconfig
             udev
             alsaLib
-            x11
+            xlibsWrapper
             xorg.libXcursor
             xorg.libXrandr
             xorg.libXi

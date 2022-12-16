@@ -1,6 +1,6 @@
-use bevy_rapier2d::prelude::{Point, SharedShape};
+use bevy_rapier2d::rapier::{math::Point, geometry::SharedShape};
 
-use super::brushes2::*;
+use super::brushes::*;
 
 pub fn mesh_for(t: Tile) -> Option<SharedShape> {
     match t {

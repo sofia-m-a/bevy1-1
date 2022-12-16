@@ -1,5 +1,4 @@
-#![feature(int_abs_diff)]
-#![feature(bool_to_option)]
+#![feature(trivial_bounds)]
 
 use assets::{set_texture_filters_to_nearest, setup_sprites, SpriteAssets, P1_WALK01, TILE_SIZE};
 use benimator::{AnimationPlugin, Play};
@@ -14,10 +13,10 @@ mod camera;
 mod map;
 use camera::*;
 use extent::Extent;
-use map::{brushes2::Gen, chunk_loader, level_graph::debug_graph};
+use map::{brushes::Gen, chunk_loader, level_graph::debug_graph};
 use rand_pcg::Pcg64;
 
-use crate::map::brushes2;
+use crate::map::brushes;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
 enum GameState {

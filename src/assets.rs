@@ -1,22 +1,32 @@
 use std::time::Duration;
 
-use benimator::{Frame, SpriteSheetAnimation};
-use bevy::{prelude::*, render::render_resource::TextureUsages};
+use bevy::{prelude::*, render::render_resource::TextureUsages, reflect::TypeUuid};
 
 pub const TILE_SIZE: u32 = 70;
 pub const SHEET_W: u16 = 27;
 pub const SHEET_H: u16 = 58;
+
+// Create the animation asset
+#[derive(TypeUuid, Deref)]
+#[uuid = "ae6a74db-f6fa-43c4-ac16-01d13b50e4c6"]
+struct Animation(benimator::Animation);
+
+// Create the player component
+#[derive(Default, Component, Deref, DerefMut)]
+struct AnimationState(benimator::State);
+
+#[derive(Resource)]
 pub struct SpriteAssets {
     pub tile_texture: Handle<TextureAtlas>,
     pub player_atlas: Handle<TextureAtlas>,
-    pub p1_walk_animation: Handle<SpriteSheetAnimation>,
+    pub p1_walk_animation: Handle<Animation>,
 }
 
 pub fn setup_sprites(
     mut commands: Commands,
     assets: Res<AssetServer>,
     mut atlases: ResMut<Assets<TextureAtlas>>,
-    mut animations: ResMut<Assets<SpriteSheetAnimation>>,
+    mut animations: ResMut<Assets<Animation>>,
 ) {
     let texture_handle = assets.load("numbering.png");
 
@@ -40,20 +50,19 @@ pub fn setup_sprites(
     ]
     .iter()
     {
-        player_atlas.add_texture(bevy::sprite::Rect {
+        player_atlas.add_texture(bevy::math::Rect {
             min: Vec2::new(x as f32, y as f32),
             max: Vec2::new((x + w) as f32, (y + h) as f32),
         });
     }
 
-    let walk_animation = SpriteSheetAnimation::from_frames(
+    let walk_animation = Animation(benimator::Animation::from_frames(
         (5..=15)
-            .map(|r| Frame {
+            .map(|r| benimator::Frame {
                 duration: Duration::from_millis(100),
                 index: r,
-            })
-            .collect(),
-    );
+            }),
+    ));
 
     commands.insert_resource(SpriteAssets {
         tile_texture: atlases.add(TextureAtlas::from_grid(
@@ -61,6 +70,8 @@ pub fn setup_sprites(
             Vec2::splat(TILE_SIZE as f32),
             SHEET_W as usize,
             SHEET_H as usize,
+            None,
+            None
         )),
         player_atlas: atlases.add(player_atlas),
         p1_walk_animation: animations.add(walk_animation),

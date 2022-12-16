@@ -20,7 +20,7 @@ pub struct CameraCenter;
 
 #[derive(Debug, Component)]
 pub struct SofiaCamera {
-    pub view: Rect<f32>,
+    pub view: Rect,
     pub aspect_ratio: f32,
 }
 
@@ -120,10 +120,10 @@ fn letterbox(
         }
 
         c.view = Rect {
-            left: (t.x - width / 2.0 + trim_x / 2.0) / (TILE_SIZE as f32),
-            right: (t.x + width / 2.0 - trim_x / 2.0) / (TILE_SIZE as f32),
-            top: (t.y + height / 2.0 - trim_y / 2.0) / (TILE_SIZE as f32),
-            bottom: (t.y - height / 2.0 + trim_y / 2.0) / (TILE_SIZE as f32),
+            min: Vec2::new((t.x - width / 2.0 + trim_x / 2.0) / (TILE_SIZE as f32),
+                (t.x + width / 2.0 - trim_x / 2.0) / (TILE_SIZE as f32)),
+            max: Vec2::new((t.y + height / 2.0 - trim_y / 2.0) / (TILE_SIZE as f32), 
+                (t.y - height / 2.0 + trim_y / 2.0) / (TILE_SIZE as f32)),
         };
     }
 }

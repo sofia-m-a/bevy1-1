@@ -3,7 +3,7 @@
 	// Extension identifier format: ${publisher}.${name}. Example: vscode.csharp
 	// List of extensions which should be recommended for users of this workspace.
 	"recommendations": [
-		"matklad.rust-analyzer",
+		"rust-lang.rust-analyzer",
 		"jnoortheen.nix-ide",
 		"arrterian.nix-env-selector",
 		"bbenoist.nix",
