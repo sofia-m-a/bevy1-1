@@ -1,6 +1,8 @@
 use std::collections::HashSet;
 
 use bevy::prelude::Resource;
+use bevy::prelude::UVec2;
+use enum_iterator::Sequence;
 use extent::Extent;
 use itertools::iproduct;
 use itertools::Itertools;
@@ -8,6 +10,8 @@ use itertools::Position::*;
 use noise::NoiseFn;
 use noise::OpenSimplex;
 use noise::Seedable;
+use num_derive::FromPrimitive;
+use num_traits::FromPrimitive;
 use num_traits::PrimInt;
 use rand::distributions::uniform::SampleUniform;
 use rand::distributions::WeightedIndex;
@@ -18,6 +22,7 @@ use rand::Rng;
 use rand::RngCore;
 use rand::SeedableRng;
 use rand_pcg::Pcg64;
+use rstar::*;
 
 use crate::map::CHUNK_SIZE;
 
@@ -64,7 +69,7 @@ impl From<Alt5> for u16 {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Sequence, FromPrimitive)]
 pub enum Terrain {
     Cake,
     Choco,
@@ -1062,63 +1067,141 @@ fn range<T: PrimInt + SampleUniform>(gen: &mut Pcg64, range: Extent<T>) -> T {
     }
 }
 
-fn pick_extent(ground: Extent<i32>, bounds: Option<Extent<i32>>, gen: &mut Pcg64) -> Extent<i32> {
-    if let (Some(lo), Some(hi)) = (ground.lo(), ground.hi()) {
-        let min_width = bounds.and_then(|e| e.lo()).unwrap_or(0);
-        let max_width = bounds.and_then(|e| e.hi()).unwrap_or(ground.len());
-        let width = gen.gen_range(min_width..=max_width);
-        let start = gen.gen_range(lo..=hi - width);
-        let end = start + width;
-        Extent::new(start, end)
-    } else {
-        ground
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub struct Rect(pub Place, pub UVec2);
+
+impl Rect {
+    fn to_aabb(self) -> AABB<(i32, i32)> {
+        AABB::from_corners(
+            (self.0.x, self.0.y),
+            (self.0.x + self.1.x as i32, self.0.y + self.1.y as i32),
+        )
     }
 }
 
-pub fn igloo(ground: Extent<i32>, height: i32, gen: &mut Pcg64) -> Vec<(Place, Tile)> {
-    let extent = pick_extent(ground, Some(Extent::new(2, 4)), gen);
-    let d_height = i32::min(extent.len(), 4);
-    let top = gen.gen_range(height + 1..height + d_height);
-    let door = range(gen, extent);
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Sequence, FromPrimitive)]
+pub enum GroundCover {
+    FullyCovered,
+    TopCovered,
+    Bare,
+}
 
-    let mut v = Vec::new();
-    for (i, j) in iproduct!(
-        extent.iter().with_position(),
-        Extent::new(height, top).iter().with_position()
-    ) {
-        let t = match (i, j) {
-            (First(i), Last(j)) => Tile::IglooTop(LMR::L),
-            (Middle(i), Last(j)) => Tile::IglooTop(LMR::M),
-            (Last(i), Last(j)) => Tile::IglooTop(LMR::R),
-            _ => {
-                if i.into_inner() == door && j.into_inner() == height {
-                    Tile::IglooDoor
-                } else {
-                    *[Tile::IglooInterior(false), Tile::IglooInterior(true)]
-                        .choose(gen)
-                        .unwrap()
-                }
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Sequence, FromPrimitive)]
+pub enum Zone {
+    GrassPlains,
+    GrassHills,
+    GrassLake,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum Feature {
+    GroundBlock(GroundCover, Terrain, Rect),
+    HillBlock {
+        terrain: Terrain,
+        start: Place,
+        start_height: i32,
+        end_height: i32,
+    },
+    HillBridge {
+        terrain: Terrain,
+        start: Place,
+        start_height: i32,
+        end_height: i32,
+        thickness: i32,
+    },
+    Igloo {
+        start: Place,
+        height: u32,
+        width: u32,
+        door: u32,
+    },
+    Tile(Place, Tile),
+    BoxBonus(Rect),
+    BrickBonus(Rect),
+    SurfaceWater(Rect),
+
+    FlatGround(Place, u32),
+
+    Zone(Zone, Rect),
+    Offscreen(Rect),
+}
+
+impl RTreeObject for Feature {
+    type Envelope = AABB<(i32, i32)>;
+
+    fn envelope(&self) -> Self::Envelope {
+        match *self {
+            Feature::GroundBlock(_, _, r) => r.to_aabb(),
+            Feature::HillBlock {
+                start,
+                start_height,
+                end_height,
+                ..
+            } => AABB::from_corners(
+                (start.x, start.y),
+                (start.x + end_height - start_height, start.y + end_height),
+            ),
+            Feature::HillBridge {
+                start,
+                end_height,
+                thickness,
+                ..
+            } => AABB::from_corners(
+                (start.x, start.y),
+                (start.x + end_height - thickness, start.y + end_height),
+            ),
+            Feature::Igloo {
+                start,
+                height,
+                width,
+                ..
+            } => AABB::from_corners(
+                (start.x, start.y),
+                (start.x + width as i32, start.y + height as i32),
+            ),
+            Feature::Tile(start, _) => AABB::from_point((start.x, start.y)),
+            Feature::BoxBonus(r) => r.to_aabb(),
+            Feature::BrickBonus(r) => r.to_aabb(),
+            Feature::SurfaceWater(r) => r.to_aabb(),
+            Feature::FlatGround(p, length) => {
+                AABB::from_corners((p.x, p.y), (p.x + length as i32, p.y))
             }
-        };
-        v.push((Place::new(i.into_inner(), j.into_inner()), t));
+            Feature::Zone(_, r) => r.to_aabb(),
+            Feature::Offscreen(r) => r.to_aabb(),
+        }
     }
-    v
+}
+
+impl PointDistance for Feature {
+    fn distance_2(&self, point: &<Self::Envelope as Envelope>::Point) -> <<Self::Envelope as Envelope>::Point as Point>::Scalar {
+        self.envelope().distance_2(point)
+    }
+
+    fn contains_point(&self, point: &<Self::Envelope as Envelope>::Point) -> bool {
+        self.envelope().contains_point(point)
+    }
+}
+
+#[derive(Default)]
+pub struct Schema {
+    pub features: RTree<Feature>,
 }
 
 #[derive(Resource)]
 pub struct Gen {
-    pub zone: noise::OpenSimplex,
-    pub terrain: noise::OpenSimplex,
+    pub zone: noise::SuperSimplex,
+    pub terrain: noise::SuperSimplex,
     pub theme: noise::Value,
+    pub rng: Pcg64,
     pub seed: u128,
 }
 
-impl Gen {
-    pub fn new() -> Self {
+impl Default for Gen {
+    fn default() -> Self {
         let mut tr = thread_rng();
         let mut rng = Pcg64::from_rng(&mut tr).unwrap();
-        let terrain = noise::OpenSimplex::new(rng.next_u32());
-        let zone = noise::OpenSimplex::new(rng.next_u32());
+        let terrain = noise::SuperSimplex::new(rng.next_u32());
+        let zone = noise::SuperSimplex::new(rng.next_u32());
         let theme = noise::Value::new(rng.next_u32());
         let seed: u128 = rng.gen();
 
@@ -1126,99 +1209,742 @@ impl Gen {
             zone,
             terrain,
             theme,
+            rng,
             seed,
         }
     }
 }
 
-pub fn heightmap_ground(start: Place, gen: &mut Pcg64, s: OpenSimplex) -> Vec<(Place, Tile)> {
-    let mut heights = Vec::new();
-
-    let shift = |x| 1.0 + ((x + 1.0) / 2.0) * 10.0;
-
-    for i in 0..CHUNK_SIZE {
-        heights.push(shift(s.get([start.x as f64 + i as f64, start.y as f64])));
-    }
-    heights.push(2.0);
-    heights.push(10.0);
-
-    let mut v = Vec::new();
-    for (i, h) in heights.iter().copied().enumerate() {
-        let h_ = h.ceil() as usize;
-        for j in 0..h_ {
-            let tile = if j == h_ - 1 {
-                TerrainTile::BlockFace(LMR::M, TMB::T)
-            } else {
-                TerrainTile::BlockFace(LMR::M, TMB::M)
-            };
-            v.push((
-                Place::new(start.x + i as i32, start.y + j as i32),
-                Tile::Terrain(Terrain::Dirt, tile),
-            ));
-        }
-    }
-
-    v
+fn n_to_01(n: f64) -> f64 {
+    0.5 * (n + 0.1)
 }
 
-pub fn slopey_ground(start: Place, gen: &mut Pcg64, s: OpenSimplex) -> Vec<(Place, Tile)> {
-    #[derive(Clone, Copy, PartialEq, Eq)]
-    enum Angle {
-        A0,
-        A45,
-        A90,
-        N45,
-        N90,
+fn n_to_bool(n: f64) -> bool {
+    n_to_01(n).floor() as u32 % 2 == 0
+}
+
+fn n_to_enum<T: Sequence + FromPrimitive>(n: f64) -> T {
+    T::from_u32(((T::CARDINALITY as f64) * n_to_01(n)).floor() as u32)
+        .unwrap_or(T::from_u32(0).unwrap())
+}
+
+fn n_to_slice<T: Copy>(n: f64, slice: &[T]) -> T {
+    slice[(((slice.len() as f64) * n_to_01(n)).floor()) as usize]
+}
+
+fn n_to_range(n: f64, top: u32) -> u32 {
+    (n_to_01(n).floor()) as u32 % top
+}
+
+pub fn generate_level(gen: &mut Gen) -> Schema {
+    let mut features = vec![
+        //Feature::Offscreen(Rect(Place::new(-10, -10), UVec2::new(10, 200))),
+        //Feature::Offscreen(Rect(Place::new(-10, -10), UVec2::new(200, 10))),
+        Feature::Zone(
+            Zone::GrassPlains,
+            Rect(Place::new(0, 0), UVec2::new(50, 20)),
+        ),
+    ];
+
+    let mut x = 50;
+    for i in 0..20 {
+        let z = n_to_enum(gen.zone.get([x as f64, 0.0]));
+        let width =
+            ((Zone::CARDINALITY as f64) * n_to_01(gen.zone.get([x as f64, 0.0]))) % 1.0;
+        let width = (50.0 * width).floor() as u32 + 20;
+        features.push(Feature::Zone(
+            z,
+            Rect(Place::new(x, 0), UVec2::new(width, 20)),
+        ));
+        x += width as i32;
     }
 
-    let mut heights = Vec::new();
-    let mut height = 0;
-    let weights: WeightedIndex<usize> = WeightedIndex::new(&[15, 3, 1, 3, 1]).unwrap();
+    // features.push(Feature::Offscreen(Rect(
+    //     Place::new(x, -10),
+    //     UVec2::new(10, 200),
+    // )));
 
-    for _ in 0..=8 {
-        let length: usize = gen.gen_range(1..=5);
-        let angle =
-            [Angle::A0, Angle::A45, Angle::A90, Angle::N45, Angle::N90][weights.sample(gen)];
+    let mut schema = Schema {
+        features: RTree::bulk_load(features),
+    };
 
-        if heights.len() >= CHUNK_SIZE {
-            break;
-        }
+    height_map_floor_brush(gen, &mut schema);
+    detect_flat_ground(gen, &mut schema);
+    place_bonuses(gen, &mut schema);
 
-        for _ in 0..length {
-            height += match angle {
-                Angle::A0 => 0,
-                Angle::A45 => 1,
-                Angle::A90 => 3,
-                Angle::N45 => -1,
-                Angle::N90 => -3,
-            };
-            height = 0.max(height);
-            heights.push((height, angle));
+    return schema
+}
+
+#[derive(Clone, Copy, Debug)]
+struct HeightData {
+    height: u32,
+    length: u32,
+    x: i32,
+}
+
+fn height_map_floor(gen: &mut Gen, start: i32, full_length: u32) -> Vec<HeightData> {
+    let mut out = Vec::new();
+
+    let mut length = 0;
+    let mut previous_height = None;
+
+    for x in 0..full_length {
+        let next_height = (10.0 * gen.terrain.get([0.1*(start as f64 + x as f64), 0.0])).floor() as u32;
+        if previous_height == Some(next_height) {
+            length += 1;
+        } else {
+            if let Some(prev) = previous_height {
+                out.push(HeightData {
+                    height: prev,
+                    length,
+                    x: start + (x - length) as i32,
+                });
+            }
+            previous_height = Some(next_height);
+            length = 0;
         }
     }
 
-    let mut v = Vec::new();
-    for (i, (h, a)) in heights.iter().copied().enumerate() {
-        for j in 0..h {
-            let tile = if j == h - 1 {
-                match a {
-                    Angle::A45 => TerrainTile::Slope(LR::L),
-                    Angle::N45 => TerrainTile::Slope(LR::R),
-                    _ => TerrainTile::BlockFace(LMR::M, TMB::T),
+    if let Some(prev) = previous_height {
+        out.push(HeightData {
+            height: prev,
+            length,
+            x: start + (full_length - length) as i32,
+        });
+    }
+    return out;
+}
+
+fn gentle_slope(
+    gen: &mut Gen,
+    schema: &mut Schema,
+    terrain: Terrain,
+    start_y: i32,
+    h0: HeightData,
+    h1_x: i32,
+    h1_y: u32,
+) {
+    let diff = h1_y as i32 - h0.height as i32;
+    let bridge_or_block = n_to_bool(gen.zone.get([h0.x as f64, 1.0]));
+
+    if diff.abs() > h1_x - h0.x {
+        schema.features.insert(Feature::GroundBlock (
+            GroundCover::TopCovered,
+            terrain,
+            Rect(Place::new(h0.x, start_y), UVec2::new((h1_x - h0.x) as u32, h1_y)
+        )));
+    }
+    else {
+        schema.features.insert(
+            if bridge_or_block { Feature::HillBridge {
+                terrain,
+                start: Place::new(h0.x, start_y),
+                start_height: h0.height as i32,
+                end_height: h1_y as i32,
+                thickness: 2 + n_to_range(gen.zone.get([h0.x as f64, 0.0]), 7) as i32,
+            } }
+            else { Feature::HillBlock {
+                terrain,
+                start: Place::new(h0.x, start_y),
+                start_height: h0.height as i32,
+                end_height: h1_y as i32,
+            } });
+        schema.features.insert(Feature::GroundBlock (
+            GroundCover::TopCovered,
+            Terrain::Grass,
+            Rect(Place::new(h0.x + diff.abs(), start_y), UVec2::new((h1_x - (h0.x + diff.abs())) as u32, h1_y))
+        ));
+    }
+}
+
+fn height_map_floor_brush(gen: &mut Gen, schema: &mut Schema) {
+    let zones: Vec<(Zone, Rect)> = schema.features.iter().filter_map(|&f| match f {
+        Feature::Zone(z, r) => Some((z, r)),
+        _ => None
+    }).collect();
+
+    for &(z, r) in zones.iter() {
+        let hmap = height_map_floor(gen, r.0.x, r.1.x);
+        match z {
+            Zone::GrassPlains => {
+                for &HeightData { height, length, x } in hmap.iter() {
+                    let cover = n_to_enum(gen.zone.get([x as f64, 0.0]));
+                    schema.features.insert(Feature::GroundBlock(
+                        cover,
+                        Terrain::Grass,
+                        Rect(Place::new(x, r.0.y), UVec2::new(length, height / 4)),
+                    ))
                 }
-            } else if j == h - 2 && a == Angle::A45 {
-                TerrainTile::SlopeInt(LR::L)
-            } else if j == h - 2 && a == Angle::N45 {
-                TerrainTile::SlopeInt(LR::R)
+            }
+            Zone::GrassHills => {
+                for slice in hmap.windows(2) {
+                    if let &[h0, h1] = slice {
+                        gentle_slope(gen, schema, Terrain::Grass, r.0.y, h0, h1.x, h1.height);
+                    }
+                }
+                let h0 = hmap.last().unwrap();
+                let h1 = height_map_floor(gen, h0.x + h0.length as i32, 1)[0];
+                schema.features.insert(Feature::GroundBlock(
+                    GroundCover::TopCovered,
+                    Terrain::Grass,
+                    Rect(Place::new(h0.x, r.0.y), UVec2::new(h0.length, h1.height)),
+                ))
+            }
+            Zone::GrassLake => {
+                for &HeightData { height, length, x } in hmap.iter() {
+                    schema.features.insert(Feature::GroundBlock(
+                        GroundCover::TopCovered,
+                        Terrain::Grass,
+                        Rect(Place::new(x, 0), UVec2::new(length, height)),
+                    ))
+                }
+
+                schema.features.insert(Feature::SurfaceWater(Rect(r.0, UVec2::new(r.1.x, hmap.first().unwrap().height / 2))));
+            }
+        }
+    }
+}
+
+fn detect_flat_ground(gen: &mut Gen, schema: &mut Schema) {
+    let ground = schema.features.iter().filter_map(|&f| match f {
+        Feature::GroundBlock(_, _, r) => Some((r.0 + Place::new(0, r.1.y as i32), r.1.x)),
+        _ => None
+    }).collect::<Vec<_>>();
+    for (p, l) in ground {
+        schema.features.insert(Feature::FlatGround(p, l))
+    }
+}
+
+fn place_bonuses(gen: &mut Gen, schema: &mut Schema) {
+    let ground = schema.features.iter().filter_map(|&f| match f {
+        Feature::FlatGround(start, l) => Some((start, l)),
+        _ => None
+    }).collect::<Vec<_>>();
+    for (p, l) in ground {
+        let run_length = f64::max((l as f64)*n_to_01(gen.zone.get([p.x as f64, 2.0])), 0.0);
+        let run_length = run_length.floor() as u32;
+        let height = n_to_01(gen.zone.get([p.x as f64, 2.0])) * 4.0 + 2.0;
+        let height = height.floor() as u32;
+        if run_length != 0 {
+            let start = (l / 2) - (run_length / 2);
+            schema.features.insert(Feature::BrickBonus(Rect(p + Place::new(start as i32, height as i32), UVec2::new(run_length, 0))));
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+enum AbstractTile {
+    Exactly(Tile),
+    Covering(GroundCover, Terrain),
+}
+
+fn get_tile(schema: &Schema, p: (i32, i32)) -> AbstractTile {
+    let mut t = AbstractTile::Exactly(Tile::Air);
+
+    for &f in schema.features.locate_all_at_point(&p) {
+        match f {
+            Feature::GroundBlock(c, terr, _) => t = AbstractTile::Covering(c, terr),
+            Feature::HillBlock { terrain, start, start_height, end_height } => {
+                let top = start.y + start_height + p.0 - start.x;
+                if p.1 == top {
+                    t = AbstractTile::Exactly(Tile::Terrain(terrain, TerrainTile::Slope(
+                        if end_height > start_height {LR::L} else {LR::R}
+                    )));
+                } else {
+                    t = AbstractTile::Exactly(Tile::Terrain(terrain, TerrainTile::BlockFace(LMR::M, TMB::M)));
+                }
+            }
+            Feature::HillBridge { terrain, start, start_height, end_height, thickness } => {
+                let top = start.y + start_height + p.0 - start.x;
+                let bottom = start.y + start_height + p.0 - start.x - thickness;
+                if p.1 == top {
+                    t = AbstractTile::Exactly(Tile::Terrain(terrain, TerrainTile::Slope(
+                        if end_height > start_height {LR::L} else {LR::R}
+                    )));
+                } else if p.1 == bottom {
+                    t = AbstractTile::Exactly(Tile::Terrain(terrain, TerrainTile::RockSlope(
+                        if end_height > start_height {LR::R} else {LR::L},
+                        TB::B
+                    )));
+                } else if bottom < p.1 && p.1 < top {
+                    t = AbstractTile::Exactly(Tile::Terrain(terrain, TerrainTile::BlockFace(LMR::M, TMB::M)));
+                }
+            },
+            Feature::Igloo { start, height, width, door } => {
+                let tb = if start.y + height as i32 == p.1 { TB::T } else { TB::B };
+                let lmr = if start.x == p.0 { LMR::L } else if start.x + width as i32 == p.0 { LMR::R } else { LMR::M };
+                let door = start.y == 0 && (p.0 - start.x) as u32 == door;
+                t = AbstractTile::Exactly(
+                    if door { Tile::IglooDoor }
+                    else { match (tb, lmr) {
+                        (TB::T, lmr) => Tile::IglooTop(lmr),
+                        (TB::B, LMR::L) => Tile::IglooInterior(true),
+                        (TB::B, _) => Tile::IglooInterior(false),
+                    } });
+            },
+            Feature::Tile(_, tile) => t = AbstractTile::Exactly(tile),
+            Feature::BoxBonus(_) => t = AbstractTile::Exactly(Tile::CoinBox { empty: false, alt: true }),
+            Feature::BrickBonus(_) => t = AbstractTile::Exactly(Tile::CoinBox { empty: false, alt: false }),
+            Feature::SurfaceWater(r) => t = if r.0.y + r.1.y as i32 == p.1 {
+                AbstractTile::Exactly(Tile::WaterWave)
             } else {
-                TerrainTile::BlockFace(LMR::M, TMB::M)
-            };
-            v.push((
-                Place::new(start.x + i as i32, start.y + j),
-                Tile::Terrain(Terrain::Dirt, tile),
-            ));
+                AbstractTile::Exactly(Tile::Water)
+            },
+            Feature::Offscreen(_) => t = AbstractTile::Exactly(Tile::Gate(LMR::M, TB::B, false)),
+
+            _ => (),
         }
     }
 
-    v
+    t
 }
+
+pub fn render_level(schema: &Schema) -> ndarray::Array3<Tile> {
+    let (lo, hi) = (schema.features.root().envelope().lower(), schema.features.root().envelope().upper());
+    let (width, height) = ((hi.0 - lo.0) as usize, (hi.1 - lo.1) as usize);
+    let mut array = ndarray::Array::from_elem([width + 1, height + 1, 4], Tile::Air);
+
+    for (i, j) in iproduct!(0..width as i32, 0..height as i32) {
+        let tl = get_tile(schema, (lo.0 + i - 1, lo.1 + j + 1));
+        let tm = get_tile(schema, (lo.0 + i + 0, lo.1 + j + 1));
+        let tr = get_tile(schema, (lo.0 + i + 1, lo.1 + j + 1));
+        let ml = get_tile(schema, (lo.0 + i - 1, lo.1 + j + 0));
+        let mr = get_tile(schema, (lo.0 + i + 1, lo.1 + j + 0));
+        let bl = get_tile(schema, (lo.0 + i - 1, lo.1 + j - 1));
+        let bm = get_tile(schema, (lo.0 + i + 0, lo.1 + j - 1));
+        let br = get_tile(schema, (lo.0 + i + 1, lo.1 + j - 1));
+
+        let this = get_tile(schema, (lo.0 + i, lo.1 + j));
+
+        #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+        enum Seam {
+            Sloped,
+            Flat,
+            Internal,
+            Air,
+        }
+
+        fn choose_tile(gc: GroundCover, terr: Terrain, tl: AbstractTile, top: AbstractTile, left: AbstractTile) -> (Tile, bool) {
+            let tl_flat_possible = match top {
+                AbstractTile::Exactly(Tile::Terrain(terr2, TerrainTile::BlockFace(_, _)))
+                | AbstractTile::Exactly(Tile::Terrain(terr2, TerrainTile::Slope(LR::R)))
+                | AbstractTile::Covering(_, terr2) if terr2 == terr => false,
+                _ => true
+            };
+
+            let tl_seam = match tl {
+                AbstractTile::Exactly(Tile::Terrain(terr2, TerrainTile::Slope(LR::R))) if terr2 == terr => Seam::Sloped,
+                AbstractTile::Exactly(Tile::Terrain(terr2, TerrainTile::BlockFace(_, _))) if terr2 == terr => Seam::Internal,
+                AbstractTile::Covering(GroundCover::FullyCovered, terr2)
+                    if terr2 == terr && tl_flat_possible => Seam::Flat,
+                AbstractTile::Covering(_, terr2) if terr2 == terr => Seam::Internal,
+                _ => Seam::Air
+            };
+            let top_seam = match top {
+                AbstractTile::Exactly(Tile::Terrain(terr2, TerrainTile::Slope(LR::L))) if terr2 == terr => Seam::Sloped,
+                AbstractTile::Exactly(Tile::Terrain(terr2, TerrainTile::BlockFace(_, _)))
+                    if terr2 == terr => Seam::Internal,
+                AbstractTile::Covering(GroundCover::FullyCovered, terr2)
+                    if terr2 == terr && (tl_seam != Seam::Internal) => Seam::Flat,
+                AbstractTile::Covering(GroundCover::FullyCovered, terr2)
+                    if terr2 == terr && (tl_seam == Seam::Internal) => Seam::Internal,
+                _ => Seam::Air
+            };
+            let left_seam = match left {
+                AbstractTile::Exactly(Tile::Terrain(terr2, TerrainTile::Slope(LR::L))) if terr2 == terr => Seam::Sloped,
+                AbstractTile::Covering(_, terr2)
+                    | AbstractTile::Exactly(Tile::Terrain(terr2, TerrainTile::BlockFace(_,_)))
+                    if terr2 == terr && tl_seam == Seam::Flat => Seam::Flat,
+                AbstractTile::Covering(_, terr2)
+                    | AbstractTile::Exactly(Tile::Terrain(terr2, TerrainTile::BlockFace(_,_)))
+                    if terr2 == terr && tl_seam == Seam::Sloped => Seam::Sloped,
+                AbstractTile::Covering(GroundCover::FullyCovered, terr2) if terr2 == terr && tl_seam == Seam::Air => Seam::Flat,
+                AbstractTile::Covering(GroundCover::TopCovered, terr2) if terr2 == terr && tl_seam == Seam::Air => Seam::Flat,
+                AbstractTile::Covering(GroundCover::Bare, terr2) if terr2 == terr => Seam::Internal,
+                AbstractTile::Covering(_, terr2) if terr2 == terr => Seam::Internal,
+                AbstractTile::Exactly(Tile::Terrain(terr2, TerrainTile::BlockFace(_, _))) if terr2 == terr => Seam::Internal,
+                _ => Seam::Air
+            };
+
+            use Seam::*;
+            let (this_seam, end_cap, top_cover, left_cover) = match (top_seam, left_seam) {
+                (Sloped, Flat) | (Sloped, Sloped) | (Flat, Sloped) => (Seam::Sloped, false, false, false),
+                (Flat, Flat) => (Seam::Flat, false, false, false),
+                (Sloped, Internal) | (Flat, Internal) | (Internal, Internal) => (Seam::Internal, false, false, false),
+                (Internal, Sloped) | (Internal, Flat) => (Seam::Internal, true, false, false),
+                (Air, Flat) | (Air, Sloped) => (Seam::Internal, gc == GroundCover::Bare, gc != GroundCover::Bare, false),
+                (Flat, Air) | (Sloped, Air) | (Internal, Air) => (Seam::Internal, false, false, gc == GroundCover::FullyCovered),
+                (Air, Internal) => (Seam::Internal, false, gc != GroundCover::Bare, false),
+                (Air, Air) => (Seam::Internal, false, gc != GroundCover::Bare, gc == GroundCover::FullyCovered),
+            };
+
+            let t = if this_seam == Seam::Sloped {
+                TerrainTile::SlopeInt(LR::L)
+            } else if this_seam == Seam::Flat {
+                TerrainTile::FaceInt(LR::L, TB::T)
+            } else {
+                TerrainTile::BlockFace(if left_cover { LMR::L} else { LMR::M }, if top_cover { TMB::T } else { TMB::M })
+            };
+
+            (Tile::Terrain(terr, t), end_cap)
+        }
+
+        fn flip(t: Tile, lr: bool, tb: bool) -> Tile {
+            let flip_lmr = |lmr| match lmr {
+                LMR::L if lr => LMR::R,
+                LMR::R if lr => LMR::L,
+                _ => lmr
+            };
+            let flip_tmb = |tmb| match tmb {
+                TMB::T if tb => TMB::B,
+                TMB::B if tb => TMB::T,
+                _ => tmb
+            };
+            let flip_lr = |l_r| match l_r {
+                LR::L if lr => LR::R,
+                LR::R if lr => LR::L,
+                _ => l_r
+            };
+            let flip_tb = |t_b| match t_b {
+                TB::T if tb => TB::B,
+                TB::B if tb => TB::T,
+                _ => t_b
+            };
+
+            match t {
+                Tile::Terrain(terrain, TerrainTile::BlockFace(lmr, tmb))
+                    => Tile::Terrain(terrain, TerrainTile::BlockFace(flip_lmr(lmr), flip_tmb(tmb))),
+                Tile::Terrain(terrain, TerrainTile::BlockLedge(lr))
+                    => Tile::Terrain(terrain, TerrainTile::BlockLedge(flip_lr(lr))),
+                Tile::Terrain(terrain, TerrainTile::Cap(lr))
+                    => Tile::Terrain(terrain, TerrainTile::Cap(flip_lr(lr))),
+                Tile::Terrain(terrain, TerrainTile::FaceInt(lr, tb))
+                    => Tile::Terrain(terrain, TerrainTile::FaceInt(flip_lr(lr), flip_tb(tb))),
+                Tile::Terrain(terrain, TerrainTile::Half(a, lmr))
+                    => Tile::Terrain(terrain, TerrainTile::Half(a, flip_lmr(lmr))),
+                Tile::Terrain(terrain, TerrainTile::OverLedge(lr))
+                    => Tile::Terrain(terrain, TerrainTile::OverLedge(flip_lr(lr))),
+                Tile::Terrain(terrain, TerrainTile::RockSlope(lr, tb))
+                    => Tile::Terrain(terrain, TerrainTile::RockSlope(flip_lr(lr), flip_tb(tb))),
+                Tile::Terrain(terrain, TerrainTile::RoundLedge(lr))
+                    => Tile::Terrain(terrain, TerrainTile::RoundLedge(flip_lr(lr))),
+                Tile::Terrain(terrain, TerrainTile::Slope(lr))
+                    => Tile::Terrain(terrain, TerrainTile::Slope(flip_lr(lr))),
+                Tile::Terrain(terrain, TerrainTile::SlopeInt(lr))
+                    => Tile::Terrain(terrain, TerrainTile::SlopeInt(flip_lr(lr))),
+                Tile::Terrain(terrain, TerrainTile::SlopeLedge(lr))
+                    => Tile::Terrain(terrain, TerrainTile::SlopeLedge(flip_lr(lr))),
+                t => t
+            }
+        }
+
+        fn flip_2(t: AbstractTile, lr: bool, tb: bool) -> AbstractTile {
+            match t {
+                AbstractTile::Exactly(t) => AbstractTile::Exactly(flip(t, lr, tb)),
+                cov => cov
+            }
+        }
+
+        let main = match this {
+            AbstractTile::Exactly(Tile::Terrain(terr, TerrainTile::BlockFace(LMR::M, TMB::M))) => {
+                Err((GroundCover::Bare, terr))
+            }
+            AbstractTile::Covering(gc, terr) => {
+                Err((gc, terr))
+            }
+            AbstractTile::Exactly(t) => Ok(t),
+        };
+
+        let main = match main {
+            Ok(t) => (t, None, None),
+            Err((gc, terr)) => {
+                let tlo = choose_tile(gc, terr,
+                    flip_2(tl, false, false),
+                    flip_2(tm, false, false),
+                    flip_2(ml, false, false));
+                let tro = choose_tile(gc, terr,
+                    flip_2(tr, true, false),
+                    flip_2(tm, true, false),
+                    flip_2(mr, true, false));
+                let blo = choose_tile(gc, terr,
+                    flip_2(bl, false, true),
+                    flip_2(bm, false, true),
+                    flip_2(ml, false, true));
+                let bro = choose_tile(gc, terr,
+                    flip_2(br, true, true),
+                    flip_2(bm, true, true),
+                    flip_2(mr, true, true));
+
+                let (left_cap, right_cap) = (tlo.1, tro.1);
+
+                fn merge(t1: Tile, t2: Tile) -> Tile {
+                    let out = match (t1, t2) {
+                        (Tile::Terrain(t, TerrainTile::BlockFace(lmr1, tmb1)), Tile::Terrain(_, TerrainTile::BlockFace(lmr2, tmb2))) => {
+                            Tile::Terrain(t, TerrainTile::BlockFace(
+                                match (lmr1, lmr2) {
+                                    (LMR::M, x) | (x, LMR::M) => x,
+                                    _ => lmr1
+                                },
+                                match (tmb1, tmb2) {
+                                    (TMB::M, x) | (x, TMB::M) => x,
+                                    _ => tmb1
+                                },
+                            ))
+                        },
+                        (Tile::Terrain(_, TerrainTile::SlopeInt(_)), _)
+                            => t1,
+                        (_, Tile::Terrain(_, TerrainTile::SlopeInt(_)))
+                            => t2,
+                        (Tile::Terrain(_, TerrainTile::FaceInt(_, _)), _)
+                            => t1,
+                        (_, Tile::Terrain(_, TerrainTile::FaceInt(_, _)))
+                            => t2,
+                        _ => t1
+                    };
+                    out
+                }
+
+                let out = (merge(tlo.0, merge(flip(tro.0, true, false),
+                    merge(flip(blo.0, false, true), flip(bro.0, true, true)))),
+                    left_cap.then_some(terr), right_cap.then_some(terr));
+
+                out
+            }
+        };
+
+        array[[i as usize + 1, j as usize + 1, 1]] = main.0;
+        if let Some(terrain) = main.1 {
+            array[[i as usize + 1, j as usize + 1, 1]] = Tile::Terrain(terrain, TerrainTile::Cap(LR::R));
+        }
+        if let Some(terrain) = main.2 {
+            array[[i as usize + 1, j as usize + 1, 1]] = Tile::Terrain(terrain, TerrainTile::Cap(LR::L));
+        }
+    }
+
+    array
+}
+
+// pub fn generate_level(gen: &mut Gen, fl: &mut FeatureList) {
+//     let mut x = 0;
+//     for i in 0..20 {
+//         let height = (6.0 * (gen.terrain.get([x as f64, 0.0]) + 1.0)).floor() as u32;
+//         let width = gen.rng.gen_range(0..=8);
+//         let terrain_type = Terrain::from_u32(((Terrain::CARDINALITY as f64)*0.5*(gen.zone.get([x as f64 / 500.0, 1.0]) + 1.0)).floor() as u32);
+//         fl.add(Feature::CoveredGround(
+//             terrain_type.unwrap_or(Terrain::Grass), Rect(Place::new(x, 0), UVec2::new(width, height))
+//         ));
+//         x += width as i32
+//     }
+// }
+
+// pub fn dress_level(fl: &FeatureList) -> ndarray::Array3<Tile> {
+//     let mut arr = ndarray::Array3::from_elem(
+//         [fl.boundary.1.x as usize + 2, fl.boundary.1.y as usize + 2, 4], Tile::Air);
+//     for &f in fl.features.iter() {
+//         match f {
+//             Feature::CoveredGround(t, r) => {
+//                 for (i, j) in iproduct!(0..r.1.x, 0..r.1.y) {
+//                     arr[[
+//                         1 + (r.0.x - fl.boundary.0.x + i as i32) as usize,
+//                         1 + (r.0.y - fl.boundary.0.y + j as i32) as usize,
+//                         1
+//                     ]] = Tile::Terrain(t, TerrainTile::BlockFace(LMR::M, TMB::M));
+//                 }
+//             }
+//         }
+//     }
+
+//     let mut arr2 = ndarray::Array3::from_elem(
+//         [fl.boundary.1.x as usize + 2, fl.boundary.1.y as usize + 2, 4], Tile::Air);
+//     let mut arr2c = arr2.slice_mut(ndarray::s!(1..-1, 1..-1, ..));
+//     ndarray::Zip::indexed(arr.windows([3, 3, 1])).for_each(|(i, j, k), s_| {
+//         let s = s_.index_axis(ndarray::Axis(2), 0);
+
+//         fn int_block(t: Tile) -> Option<Terrain> {
+//             if let Tile::Terrain(style, TerrainTile::BlockFace(LMR::M, TMB::M)) = t {
+//                 Some(style)
+//             } else {
+//                 None
+//             }
+//         }
+
+//         if let Some(style) = int_block(s[[1, 1]]) {
+//             let top = int_block(s[[1, 2]]) == Some(style);
+//             let bottom = int_block(s[[1, 0]]) == Some(style);
+//             let left = int_block(s[[0, 1]]) == Some(style);
+//             let right = int_block(s[[2, 1]]) == Some(style);
+//             let tl = int_block(s[[0, 2]]) == Some(style);
+//             let tr = int_block(s[[2, 2]]) == Some(style);
+//             let bl = int_block(s[[0, 0]]) == Some(style);
+//             let br = int_block(s[[2, 0]]) == Some(style);
+
+//             let lmr = match (left, right) {
+//                 (true, true) => Some(LMR::M),
+//                 (true, false) => Some(LMR::R),
+//                 (false, true) => Some(LMR::L),
+//                 (false, false) => None
+//             };
+//             let tmb = match (top, bottom) {
+//                 (true, true) => Some(TMB::M),
+//                 (true, false) => Some(TMB::B),
+//                 (false, true) => Some(TMB::T),
+//                 (false, false) => None
+//             };
+//             let tt = match (lmr, tmb) {
+//                 (Some(LMR::M), Some(TMB::M)) => {
+//                     if !tl as u32 + !tr as u32 + !bl as u32 + !br as u32 > 1 {
+//                         TerrainTile::Jagged
+//                     } else if !tl { TerrainTile::FaceInt(LR::L, TB::T) }
+//                     else if !tr { TerrainTile::FaceInt(LR::R, TB::T) }
+//                     else if !bl { TerrainTile::FaceInt(LR::L, TB::B) }
+//                     else if !br { TerrainTile::FaceInt(LR::R, TB::B) }
+//                     else { TerrainTile::BlockFace(LMR::M, TMB::M) }
+//                 },
+//                 (Some(lmr), Some(tmb)) => TerrainTile::BlockFace(lmr, tmb),
+//                 (None, Some(TMB::T)) => TerrainTile::Single,
+//                 (None, Some(_)) => TerrainTile::BlockFace(LMR::M, TMB::M),
+//                 (Some(LMR::L), None) => TerrainTile::BlockLedge(LR::L),
+//                 (Some(LMR::M), None) =>  TerrainTile::BlockFace(LMR::M, TMB::T),
+//                 (Some(LMR::R), None) => TerrainTile::BlockLedge(LR::R),
+//                 (None, None) => TerrainTile::Block
+//             };
+
+//             arr2c[[i, j, 1]] = Tile::Terrain(style, tt);
+//         }
+//     });
+//     arr2
+// }
+
+// DEPRECATED
+// fn pick_extent(ground: Extent<i32>, bounds: Option<Extent<i32>>, gen: &mut Pcg64) -> Extent<i32> {
+//     if let (Some(lo), Some(hi)) = (ground.lo(), ground.hi()) {
+//         let min_width = bounds.and_then(|e| e.lo()).unwrap_or(0);
+//         let max_width = bounds.and_then(|e| e.hi()).unwrap_or(ground.len());
+//         let width = gen.gen_range(min_width..=max_width);
+//         let start = gen.gen_range(lo..=hi - width);
+//         let end = start + width;
+//         Extent::new(start, end)
+//     } else {
+//         ground
+//     }
+// }
+
+// pub fn igloo(ground: Extent<i32>, height: i32, gen: &mut Pcg64) -> Vec<(Place, Tile)> {
+//     let extent = pick_extent(ground, Some(Extent::new(2, 4)), gen);
+//     let d_height = i32::min(extent.len(), 4);
+//     let top = gen.gen_range(height + 1..height + d_height);
+//     let door = range(gen, extent);
+
+//     let mut v = Vec::new();
+//     for (i, j) in iproduct!(
+//         extent.iter().with_position(),
+//         Extent::new(height, top).iter().with_position()
+//     ) {
+//         let t = match (i, j) {
+//             (First(i), Last(j)) => Tile::IglooTop(LMR::L),
+//             (Middle(i), Last(j)) => Tile::IglooTop(LMR::M),
+//             (Last(i), Last(j)) => Tile::IglooTop(LMR::R),
+//             _ => {
+//                 if i.into_inner() == door && j.into_inner() == height {
+//                     Tile::IglooDoor
+//                 } else {
+//                     *[Tile::IglooInterior(false), Tile::IglooInterior(true)]
+//                         .choose(gen)
+//                         .unwrap()
+//                 }
+//             }
+//         };
+//         v.push((Place::new(i.into_inner(), j.into_inner()), t));
+//     }
+//     v
+// }
+
+// pub fn heightmap_ground(start: Place, gen: &mut Pcg64, s: OpenSimplex) -> Vec<(Place, Tile)> {
+//     let mut heights = Vec::new();
+
+//     let shift = |x| 1.0 + ((x + 1.0) / 2.0) * 10.0;
+
+//     for i in 0..CHUNK_SIZE {
+//         heights.push(shift(s.get([start.x as f64 + i as f64, start.y as f64])));
+//     }
+
+//     let mut v = Vec::new();
+//     for (i, h) in heights.iter().copied().enumerate() {
+//         let h_ = h.ceil() as usize;
+//         for j in 0..h_ {
+//             let tile = if j == h_ - 1 {
+//                 TerrainTile::BlockFace(LMR::M, TMB::T)
+//             } else {
+//                 TerrainTile::BlockFace(LMR::M, TMB::M)
+//             };
+//             v.push((
+//                 Place::new( i as i32, j as i32),
+//                 Tile::Terrain(Terrain::Dirt, tile),
+//             ));
+//         }
+//     }
+
+//     v
+// }
+
+// pub fn slopey_ground(start: Place, gen: &mut Pcg64, s: OpenSimplex) -> Vec<(Place, Tile)> {
+//     #[derive(Clone, Copy, PartialEq, Eq)]
+//     enum Angle {
+//         A0,
+//         A45,
+//         A90,
+//         N45,
+//         N90,
+//     }
+
+//     let mut heights = Vec::new();
+//     let mut height = 0;
+//     let weights: WeightedIndex<usize> = WeightedIndex::new(&[15, 3, 1, 3, 1]).unwrap();
+
+//     for _ in 0..=8 {
+//         let length: usize = gen.gen_range(1..=5);
+//         let angle =
+//             [Angle::A0, Angle::A45, Angle::A90, Angle::N45, Angle::N90][weights.sample(gen)];
+
+//         if heights.len() >= CHUNK_SIZE {
+//             break;
+//         }
+
+//         for _ in 0..length {
+//             height += match angle {
+//                 Angle::A0 => 0,
+//                 Angle::A45 => 1,
+//                 Angle::A90 => 3,
+//                 Angle::N45 => -1,
+//                 Angle::N90 => -3,
+//             };
+//             height = 0.max(height);
+//             heights.push((height, angle));
+//         }
+//     }
+
+//     let mut v = Vec::new();
+//     for (i, (h, a)) in heights.iter().copied().enumerate() {
+//         for j in 0..h {
+//             let tile = if j == h - 1 {
+//                 match a {
+//                     Angle::A45 => TerrainTile::Slope(LR::L),
+//                     Angle::N45 => TerrainTile::Slope(LR::R),
+//                     _ => TerrainTile::BlockFace(LMR::M, TMB::T),
+//                 }
+//             } else if j == h - 2 && a == Angle::A45 {
+//                 TerrainTile::SlopeInt(LR::L)
+//             } else if j == h - 2 && a == Angle::N45 {
+//                 TerrainTile::SlopeInt(LR::R)
+//             } else {
+//                 TerrainTile::BlockFace(LMR::M, TMB::M)
+//             };
+//             v.push((
+//                 Place::new(i as i32, j),
+//                 Tile::Terrain(Terrain::Dirt, tile),
+//             ));
+//         }
+//     }
+
+//     v
+// }

@@ -16,3 +16,5 @@ portucullis could be itemified
 cacti, clouds, and bush should be backgrounds
 slime drip as particles?
 levels, buttons, keys, diamonds: items
+
+composable, overlayable tiles (yak shaving)
