@@ -24,7 +24,10 @@ use extent::Extent;
 use rand_pcg::Pcg64;
 use std::collections::HashSet;
 
-use self::{level_graph::{gen_graph, layout_graph}, physics::collider_for};
+use self::{
+    level_graph::{gen_graph, layout_graph},
+    physics::collider_for,
+};
 
 // must be a power of two for Morton encoding to work
 // otherwise we need to change CHUNK_SIZE^2 below to to_nearest_pow2(CHUNK_SIZE)^2
@@ -80,18 +83,40 @@ impl From<Tile> for ActiveTile {
 #[derive(Component, Clone, Copy, Debug)]
 pub struct Chunk;
 
-#[derive(Component, Clone, Copy, Debug)]
-pub struct Level;
+#[derive(Copy, Clone, Component, PartialEq, Eq, Debug, Hash)]
+pub struct LevelEntity;
 
-pub fn load_level(mut commands: Commands, mut res_gen: ResMut<Gen>, sa: Res<SpriteAssets>) {
+#[derive(Clone, Copy, Resource)]
+pub struct LevelResource(pub Entity);
+
+pub fn add_level_resource(mut commands: Commands) {
+    let entity = commands
+        .spawn(LevelEntity)
+        .insert(SpatialBundle::from_transform(Transform::from_scale(
+            Vec3::new(1.0 / TILE_SIZE as f32, 1.0 / TILE_SIZE as f32, 1.0),
+        )))
+        .id();
+    commands.insert_resource(LevelResource(entity));
+}
+
+#[derive(Component, Clone, Copy, Debug)]
+pub struct Tilemap;
+
+pub fn load_level(
+    mut commands: Commands,
+    level: Res<LevelResource>,
+    mut res_gen: ResMut<Gen>,
+    sa: Res<SpriteAssets>,
+) {
     let schema = generate_level(&mut res_gen);
     let arr = render_level(&schema);
     let v = arr.slice(ndarray::s![1isize..-1, 1isize..-1, ..]);
-    let level = commands
-        .spawn(Level)
-        .insert(VisibilityBundle::default())
+    let tilemap = commands
+        .spawn(Tilemap)
+        .insert(SpatialBundle::default())
         .insert(RigidBody::Fixed)
         .id();
+    commands.entity(level.0).add_child(tilemap);
 
     let mut storage_and_entity = Vec::with_capacity(v.dim().2);
     for _ in 0..v.dim().2 {
@@ -101,7 +126,7 @@ pub fn load_level(mut commands: Commands, mut res_gen: ResMut<Gen>, sa: Res<Spri
         });
         let tilemap_entity = commands.spawn_empty().id();
         storage_and_entity.push((storage, tilemap_entity));
-        commands.entity(level).add_child(tilemap_entity);
+        commands.entity(tilemap).add_child(tilemap_entity);
     }
 
     for ((i, j, k), &t) in v.indexed_iter() {

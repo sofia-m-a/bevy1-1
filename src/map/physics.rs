@@ -1,4 +1,7 @@
-use bevy_rapier2d::{rapier::{geometry::SharedShape, math::Point}, prelude::Collider};
+use bevy_rapier2d::{
+    prelude::Collider,
+    rapier::{geometry::SharedShape, math::Point},
+};
 
 use super::brushes::*;
 
@@ -44,6 +47,6 @@ pub fn collider_for(f: Feature) -> Option<Collider> {
         Feature::BoxBonus(r) => Some(Collider::cuboid(r.1.x as f32, r.1.y as f32)),
         Feature::BrickBonus(r) => Some(Collider::cuboid(r.1.x as f32, r.1.y as f32)),
         Feature::GroundBlock(_, _, r) => Some(Collider::cuboid(r.1.x as f32, r.1.y as f32)),
-        _ => None
+        _ => None,
     }
 }

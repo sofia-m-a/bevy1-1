@@ -2,15 +2,15 @@
 // use benimator::*;
 use bevy::{
     prelude::*,
-    render::{render_resource::WgpuLimits, settings::WgpuSettings, camera::ScalingMode},
+    render::{camera::ScalingMode, render_resource::WgpuLimits, settings::WgpuSettings},
 };
 use bevy_ecs_tilemap::TilemapPlugin;
-use bevy_pixel_camera::{PixelBorderPlugin, PixelCameraPlugin, PixelCameraBundle};
+// use bevy_pixel_camera::{PixelBorderPlugin, PixelCameraPlugin, PixelCameraBundle};
+use crate::map::brushes;
 use bevy_rapier2d::prelude::*;
 use extent::Extent;
 use iyes_loopless::prelude::*;
 use rand_pcg::Pcg64;
-use crate::map::brushes;
 
 use assets::{
     set_texture_filters_to_nearest, setup_sprites, Animation, AnimationAsset, SpriteAssets,
@@ -20,8 +20,9 @@ mod assets;
 mod camera;
 mod map;
 use camera::*;
-use map::{brushes::Gen, chunk_loader, level_graph::debug_graph};
-
+use map::{
+    add_level_resource, brushes::Gen, chunk_loader, level_graph::debug_graph, LevelResource,
+};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
 enum GameState {
@@ -44,12 +45,8 @@ fn main() {
             ..Default::default()
         })
         .add_loopless_state(GameState::Splash)
-        .add_plugins(DefaultPlugins.set(
-            bevy::render::texture::ImagePlugin::default_nearest()
-        ))
-        .add_plugin(
-            RapierPhysicsPlugin::<NoUserData>::default().with_physics_scale(TILE_SIZE as f32),
-        )
+        .add_plugins(DefaultPlugins.set(bevy::render::texture::ImagePlugin::default_nearest()))
+        .add_plugin(RapierPhysicsPlugin::<NoUserData>::default())
         .add_plugin(RapierDebugRenderPlugin {
             always_on_top: true,
             enabled: true,
@@ -58,18 +55,22 @@ fn main() {
         //.add_plugin(bevy::diagnostic::FrameTimeDiagnosticsPlugin)
         //.add_plugin(bevy::diagnostic::LogDiagnosticsPlugin::default())
         .add_plugin(TilemapPlugin)
-        //.add_plugin(LetterboxCameraPlugin)
-        .add_plugin(PixelCameraPlugin)
-        .add_plugin(PixelBorderPlugin {
+        .add_system_to_stage(
+            CoreStage::PostUpdate,
+            bevy::render::camera::camera_system::<LetterboxProjection>,
+        )
+        .add_plugin(LetterboxBorderPlugin {
             color: Color::rgb(0.1, 0.1, 0.1),
         })
         .add_system(animate)
         .add_asset::<AnimationAsset>()
+        .add_startup_system(add_level_resource)
         .insert_resource(ClearColor(SKY_COLOR))
         .add_enter_system(GameState::Splash, setup_sprites)
         .add_system(update_clear_colour.run_in_state(GameState::Splash))
         .init_resource::<Gen>()
-        .add_enter_system_set(GameState::Level,
+        .add_enter_system_set(
+            GameState::Level,
             ConditionSet::new()
                 .with_system(setup)
                 .with_system(setup_player)
@@ -133,7 +134,7 @@ fn keyboard_input_system(
     }
 
     if let Some(mut p) = player.iter_mut().next() {
-        p.0.impulse = (0.01 * dir).into();
+        p.0.impulse = (100.0 * dir).into();
     }
 }
 
@@ -142,8 +143,10 @@ fn setup(
     mut rapier: ResMut<RapierConfiguration>,
     mut color: ResMut<ClearColor>,
 ) {
-    commands.spawn(PixelCameraBundle::from_resolution(1280, 720));
-    
+    commands
+        .spawn(LetterboxCameraBundle::default())
+        .insert(SofiaCamera::default());
+
     // physics
     rapier.gravity = Vec2::new(0.0, 0.0).into();
 
@@ -151,14 +154,14 @@ fn setup(
     *color = ClearColor(SKY_COLOR);
 }
 
-fn setup_player(mut commands: Commands, graphics: Res<SpriteAssets>) {
+fn setup_player(mut commands: Commands, level: Res<LevelResource>, graphics: Res<SpriteAssets>) {
     let player_size = [P1_WALK01[2], P1_WALK01[3]];
     let (w, h) = (
         player_size[0] as f32 / TILE_SIZE as f32,
         player_size[1] as f32 / TILE_SIZE as f32,
     );
 
-    commands
+    let player = commands
         .spawn(Player)
         .insert(CameraCenter)
         .insert(RigidBody::Dynamic)
@@ -177,10 +180,10 @@ fn setup_player(mut commands: Commands, graphics: Res<SpriteAssets>) {
             parent
                 .spawn(Onscreen)
                 .insert(Transform::from_translation(Vec3::new(-20.0, -10.0, 0.0)));
-                parent
+            parent
                 .spawn(Onscreen)
                 .insert(Transform::from_translation(Vec3::new(20.0, 10.0, 0.0)));
-        });
-        //.insert(Transform::from_translation(Vec3::new(0.0, 0.0, 0.0))
-          //  .with_scale(Vec3::new(1.0 / TILE_SIZE as f32, 1.0 / TILE_SIZE as f32, 1.0)));
+        })
+        .id();
+    commands.entity(level.0).add_child(player);
 }
