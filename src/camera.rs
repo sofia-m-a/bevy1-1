@@ -2,117 +2,178 @@ use bevy::{
     math::Vec3Swizzles,
     prelude::*,
     render::{
-        camera::{CameraProjection, CameraRenderGraph, OrthographicProjection, ScalingMode},
+        camera::{CameraProjection, CameraRenderGraph},
         primitives::Frustum,
         view::VisibleEntities,
     },
     sprite::Anchor,
 };
-
-use crate::assets::TILE_SIZE;
+use bevy_tweening::Lerp;
+use interpolation::Ease;
 
 pub const ASPECT_X: u32 = 16;
 pub const ASPECT_Y: u32 = 9;
 pub const ASPECT: f32 = ASPECT_X as f32 / ASPECT_Y as f32;
 
-#[derive(Clone, Copy, Component)]
-pub struct AttractCamera {
-    pub radius_snap: f32,
-    pub radius_attract: f32,
+#[derive(Clone, Copy, Debug, Component)]
+pub enum CameraGuide {
+    Attractor {
+        attraction_radius: f32,
+    },
+    Center,
+    MustBeOnscreen,
 }
 
-#[derive(Clone, Copy, Component)]
-pub struct CameraCenter;
+pub fn get_camera_rect(camera_transform: &Transform, proj: &LetterboxProjection) -> Rect {
+    Rect::from_corners(
+        camera_transform.transform_point(Vec3::new(-1.0, -1.0 / proj.desired_aspect_ratio, 0.0)).xy(),
+        camera_transform.transform_point(Vec3::new(1.0, 1.0 / proj.desired_aspect_ratio, 0.0)).xy(),)
+}
 
-#[derive(Clone, Copy, Component)]
-pub struct Onscreen;
-
-#[derive(Debug, Default, Component)]
+#[derive(Debug, Component)]
 pub struct SofiaCamera {
-    pub view: Rect,
+    //pub center_s: FirstOrderSmoother2,
+    //pub size_s: FirstOrderSmoother2,
+    pub snap: f32,
+    pub target_center: Vec2,
+    pub target_size: Vec2,
 }
 
-pub fn camera_center(
-    centers: Query<&Transform, (With<CameraCenter>, Without<Camera>)>,
-    attractors: Query<(&AttractCamera, &Transform), Without<Camera>>,
-    onscreen: Query<&Transform, (With<Onscreen>, Without<Camera>)>,
-    mut cam: Query<
-        (
-            &mut Transform,
-            &mut OrthographicProjection,
-            &mut SofiaCamera,
-        ),
-        With<Camera>,
-    >,
-) {
-    let center_mean = centers.iter().fold((Vec2::ZERO, 0.0), |(c, n), v| {
-        (c + v.translation.xy(), n + 1.0)
-    });
-    let center_mean = center_mean.0 / center_mean.1;
+// #[derive(Clone, Copy, Debug, Component)]
+// pub struct FirstOrderSmoother2 {
+//     // units per second
+//     pub velocity: Vec2,
+//     // units per second per second
+//     pub max_acceleration: f32,
+//     pub target_position: Vec2,
+// }
 
-    let camera_center = attractors
-        .iter()
-        .map(|a| {
-            let distance2 = (a.1.translation.xy() - center_mean).length_squared();
-            let attraction = f32::max(0.0, distance2 - a.0.radius_attract * a.0.radius_attract);
-            let snap = f32::max(0.0, distance2 - a.0.radius_snap * a.0.radius_snap);
-            let weight = -(attraction + snap * snap * snap);
-            weight * a.1.translation.xy()
+// impl FirstOrderSmoother2 {
+//     pub fn from_max_accel(a: f32) -> Self {
+//         Self {
+//             velocity: Default::default(),
+//             max_acceleration: a,
+//             target_position: Default::default(),
+//         }
+//     }
+// }
+ 
+// impl FirstOrderSmoother2 {
+//     pub fn update(&mut self, transform: Vec2, dt: f32) -> Vec2 {
+//         let predicted = transform + self.velocity * dt;
+//         let dx = self.target_position - predicted;
+//         let target_dv = dx / dt;
+//         let dv = target_dv - self.velocity;
+//         let a = dv.length() / dt;
+//         let a = f32::min(1.0, a);
+//         self.velocity += dv.normalize_or_zero() * a;
+//         self.velocity * dt
+//         // let dx = self.target_position - transform;
+//         // let target_v = dx / dt;
+//         // let new = target_v - self.velocity;
+//         // //dbg!(*self, transform, dx, target_v, new);
+//         // self.velocity += new * f32::min(1.0, dt * self.max_acceleration / new.length());
+//         // //dbg!(self.velocity);
+//         // self.velocity * dt
+//     }
+// }
+
+// #[cfg(test)]
+// mod tests {
+//     use bevy::prelude::Vec2;
+
+//     use super::FirstOrderSmoother2;
+
+//     #[test]
+//     fn exploration() {
+//         let mut smoother = FirstOrderSmoother2::from_max_accel(1.0);
+//         let mut position = Vec2::new(0.0, 0.0);
+//         smoother.target_position = Vec2::new(10.0, 10.0);
+//         for i in 0..100 {
+//             position = smoother.update(position, 0.1);
+//             println!("{}", position);
+//         }
+//     }
+// }
+
+struct TransLerp(Transform);
+
+impl Lerp for TransLerp {
+    type Scalar = f32;
+    fn lerp(&self, other: &TransLerp, t: &f32) -> Self {
+        TransLerp(Transform {
+            translation: self.0.translation.lerp(other.0.translation, *t),
+            rotation: self.0.rotation.slerp(other.0.rotation, *t),
+            scale: self.0.scale.lerp(other.0.scale, *t),
         })
-        .fold((Vec2::ZERO, 1.0), |(c, n), v| (c + v, n + 1.0));
-    let camera_center = (camera_center.0 + center_mean) / camera_center.1;
-
-    let mut lo = Vec2::ZERO;
-    let mut hi = Vec2::ZERO;
-    for t in centers.iter().chain(onscreen.iter()) {
-        lo = lo.min(t.translation.xy());
-        hi = hi.max(t.translation.xy());
     }
+}
 
-    let size = Vec2::max((camera_center - lo).abs(), (camera_center - hi).abs());
+pub fn update_sofia_camera(
+    time: Res<Time>,
+    guides: Query<(&CameraGuide, &GlobalTransform), Without<SofiaCamera>>,
+    mut cams: Query<(&mut Transform, &LetterboxProjection, &mut SofiaCamera)>) {
 
-    let scale = TILE_SIZE as f32;
-    let def_camera_plane = OrthographicProjection::default().far - 0.1;
-    let new_projection = if size.x > size.y {
-        OrthographicProjection {
-            scale,
-            scaling_mode: ScalingMode::None,
-            // left: camera_center.x - size.x / 2.0,
-            // right: camera_center.x + size.x / 2.0,
-            // top: camera_center.y + (size.x / ASPECT) / 2.0,
-            // bottom: camera_center.y - (size.x / ASPECT) / 2.0,
-            ..Default::default()
+    for (mut cam_trans, proj, mut cam) in cams.iter_mut() {
+
+        let aspect = proj.desired_aspect_ratio;
+
+        let mut center_sum = Vec2::ZERO;
+        let mut center_n = 0.0;
+        let mut lowest = None;
+        let mut highest = None;
+
+        for (&guide, &transform) in guides.iter() {
+            let transform = transform.compute_transform();
+            match guide {
+                CameraGuide::Attractor { attraction_radius } => {
+                    let delta = transform.translation.xy() - cam_trans.translation.xy();
+                    let r_2 = delta.length_squared();
+                    let a_2 = attraction_radius * attraction_radius;
+                    let distance_inside_2 = f32::max(0.0, (a_2 - r_2) / a_2);
+                    center_sum += delta * distance_inside_2.powi(2);
+                    center_n += 1.0;
+                },
+                CameraGuide::Center => {
+                    center_sum += transform.translation.xy();
+                    center_n += 1.0;
+                    lowest = Some(lowest.unwrap_or(transform.translation.xy()).min(transform.translation.xy()));
+                    highest = Some(highest.unwrap_or(transform.translation.xy()).max(transform.translation.xy()));
+                },
+                CameraGuide::MustBeOnscreen => {
+                    lowest = Some(lowest.unwrap_or(transform.translation.xy()).min(transform.translation.xy()));
+                    highest = Some(highest.unwrap_or(transform.translation.xy()).max(transform.translation.xy()));
+                },
+            }
         }
-    } else {
-        OrthographicProjection {
-            scale,
-            scaling_mode: ScalingMode::None,
-            // left: camera_center.x - (size.y * ASPECT) / 2.0,
-            // right: camera_center.x + (size.y * ASPECT) / 2.0,
-            // top: camera_center.y + size.y / 2.0,
-            // bottom: camera_center.y - size.y / 2.0,
-            ..Default::default()
+
+        if center_n > 0.0 {
+            cam.target_center = center_sum / center_n;
         }
-    };
 
-    let new_translation = Transform::from_translation(camera_center.extend(def_camera_plane));
+        let size = match (lowest, highest) {
+            (Some(vl), Some(vh)) => {
+                Vec2::max((vl - cam.target_center).abs(), (vh - cam.target_center).abs())
+            },
+            (Some(v), None) | (None, Some(v)) => {
+                v - cam.target_center
+            },
+            (None, None) => Vec2::new(1.0, 1.0),
+        };
 
-    for mut cam in cam.iter_mut() {
-        *cam.0 = new_translation;
-        *cam.1 = new_projection.clone();
-        cam.2.view = Rect::new(
-            new_projection.left,
-            new_projection.bottom,
-            new_projection.right,
-            new_projection.top,
-        );
+        let size = Vec2::new(size.x, size.y / aspect);
+        let size = f32::max(size.x, size.y);
+        cam.target_size = Vec2::new(size, size);
+
+        if cam.snap > 1.0 && (cam_trans.scale.xy() != cam.target_center || cam_trans.scale.xy() != cam.target_size) {
+            cam.snap = 0.0;
+        }
+        
+        let x = cam.snap.cubic_in();
+        *cam_trans = TransLerp(*cam_trans).lerp(&TransLerp(Transform::from_translation(
+            cam.target_center.extend(cam_trans.translation.z)).with_scale(cam.target_size.extend(cam_trans.scale.z))), &x).0;
+        cam.snap += 1.0*time.delta_seconds();
     }
-
-    // let target = Transform::from_translation((camera_center).extend(def_camera_plane));
-
-    // for mut cam in cam.iter_mut() {
-    //     *cam.0 = target;
-    // }
 }
 
 #[derive(Debug, Clone, Reflect, Component)]
@@ -181,6 +242,15 @@ impl Default for LetterboxProjection {
     }
 }
 
+// Component
+#[derive(Component)]
+enum Border {
+    Left,
+    Right,
+    Top,
+    Bottom,
+}
+
 #[derive(Bundle)]
 pub struct LetterboxCameraBundle {
     pub camera: Camera,
@@ -190,6 +260,7 @@ pub struct LetterboxCameraBundle {
     pub frustum: Frustum,
     pub transform: Transform,
     pub global_transform: GlobalTransform,
+    pub visibility: VisibilityBundle,
     pub camera_2d: Camera2d,
 }
 
@@ -214,6 +285,7 @@ impl Default for LetterboxCameraBundle {
             frustum,
             transform,
             global_transform: Default::default(),
+            visibility: VisibilityBundle::default(),
             camera_2d: Default::default(),
         }
     }
@@ -227,7 +299,6 @@ pub struct LetterboxBorderPlugin {
 impl Plugin for LetterboxBorderPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(BorderColor(self.color))
-            .add_startup_system(spawn_borders)
             .add_system_to_stage(CoreStage::PostUpdate, resize_borders);
     }
 }
@@ -236,18 +307,8 @@ impl Plugin for LetterboxBorderPlugin {
 #[derive(Clone, Debug, Resource)]
 pub struct BorderColor(Color);
 
-// Component
-#[derive(Component)]
-enum Border {
-    Left,
-    Right,
-    Top,
-    Bottom,
-}
-
-/// System to spawn the opaque border. Automatically added by the plugin as a
-/// startup system.
-pub fn spawn_borders(mut commands: Commands, color: Res<BorderColor>) {
+/// Function to spawn the opaque border.
+pub fn spawn_borders(commands: &mut Commands, camera: Entity, color: Res<BorderColor>) {
     let mut spawn_border = |name: &'static str, side: Border| -> Entity {
         commands
             .spawn((
@@ -270,61 +331,47 @@ pub fn spawn_borders(mut commands: Commands, color: Res<BorderColor>) {
     let top = spawn_border("Top", Border::Top);
     let bottom = spawn_border("Bottom", Border::Bottom);
 
-    commands
-        .spawn((SpatialBundle::default(), Name::new("Borders")))
-        .push_children(&[left, right, top, bottom]);
+    commands.entity(camera)
+        .add_child(left)
+        .add_child(right)
+        .add_child(top)
+        .add_child(bottom);
 }
 
 fn resize_borders(
-    cameras: Query<
-        (&LetterboxProjection, &GlobalTransform),
-        Or<(Changed<LetterboxProjection>, Changed<GlobalTransform>)>,
-    >,
+    cameras: Query<(Entity, &LetterboxProjection, &Children), Changed<LetterboxProjection>>,
     mut borders: Query<(&mut Sprite, &mut Transform, &Border), Without<LetterboxProjection>>,
 ) {
-    if let Ok((projection, transform)) = cameras.get_single() {
-        let z = projection.far - 0.2;
+    if let Ok((e, projection, children)) = cameras.get_single() {
         let alpha = 1.0 / projection.desired_aspect_ratio;
-        for (mut sprite, mut transform, border) in borders.iter_mut() {
-            match border {
-                Border::Left => {
-                    *transform = Transform::from_xyz(-1.0 - projection.fraction_x, -1.0 * alpha, z);
-                    sprite.custom_size = Some(Vec2::new(projection.fraction_x, 2.0 * alpha));
-                }
-                Border::Right => {
-                    *transform = Transform::from_xyz(1.0, -1.0 * alpha, z);
-                    sprite.custom_size = Some(Vec2::new(projection.fraction_x, 2.0 * alpha));
-                }
-                Border::Top => {
-                    *transform =
-                        Transform::from_xyz(-1.0, (-1.0 - projection.fraction_y) * alpha, z);
-                    sprite.custom_size = Some(Vec2::new(2.0, projection.fraction_y * alpha));
-                }
-                Border::Bottom => {
-                    *transform = Transform::from_xyz(-1.0, 1.0 * alpha, z);
-                    sprite.custom_size = Some(Vec2::new(2.0, projection.fraction_y * alpha));
+
+        for &child in children.iter() {
+            if let Ok((mut sprite, mut transform, border)) = borders.get_mut(child) {
+                let vec_hor = Vec2::new(projection.fraction_x, 2.0 * alpha);
+                let vec_ver = Vec2::new(2.0, projection.fraction_y * alpha);
+                match border {
+                    Border::Left => {
+                        let trans = Vec3::new(-1.0 - projection.fraction_x, -1.0 * alpha, -0.1);
+                        *transform = Transform::from_translation(trans);
+                        sprite.custom_size = Some(vec_hor);
+                    }
+                    Border::Right => {
+                        let trans = Vec3::new(1.0, -1.0 * alpha, -0.1);
+                        *transform = Transform::from_translation(trans);
+                        sprite.custom_size = Some(vec_hor);
+                    }
+                    Border::Top => {
+                        let trans = Vec3::new(-1.0, (-1.0 - projection.fraction_y) * alpha, -0.1);
+                        *transform = Transform::from_translation(trans);
+                        sprite.custom_size = Some(vec_ver);
+                    }
+                    Border::Bottom => {
+                        let trans = Vec3::new(-1.0, 1.0 * alpha, -0.1);
+                        *transform = Transform::from_translation(trans);
+                        sprite.custom_size = Some(vec_ver);
+                    }
                 }
             }
         }
-
-        // let width = projection.trim_x / 2.0;
-        // let height = projection.trim_y * alpha / 2.0;
-        // let left = transform.translation().x + match projection.window_origin {
-        //     WindowOrigin::Center => -1.0,
-        //     WindowOrigin::BottomLeft => 0.0,
-        // };
-        // let right = transform.translation().x + match projection.window_origin {
-        //     WindowOrigin::Center => 1.0,
-        //     WindowOrigin::BottomLeft => 1.0,
-        // };
-        // let bottom = transform.translation().y + match projection.window_origin {
-        //     WindowOrigin::Center => -1.0 * alpha,
-        //     WindowOrigin::BottomLeft => 0.0,
-        // };
-        // let top = transform.translation().y + match projection.window_origin {
-        //     WindowOrigin::Center => 1.0 * alpha,
-        //     WindowOrigin::BottomLeft => 1.0 * alpha,
-        // };
-        // dbg!(left, right, top, bottom, width, height, transform.translation(), projection.trim_x, projection.trim_y);
     }
 }

@@ -216,13 +216,14 @@ version = "0.1.0"
 dependencies = [
  "benimator",
  "bevy",
- "bevy_easings",
  "bevy_ecs_tilemap",
  "bevy_rapier2d",
+ "bevy_tweening",
  "big-brain",
  "bitflags",
  "enum-iterator",
  "extent",
+ "interpolation",
  "itertools",
  "iyes_loopless",
  "lindel",
@@ -380,16 +381,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5d193c3d56e3bdd106596327d15dd67ddfd862f8b5aa8260677efefe3ddef736"
 dependencies = [
  "bevy_internal",
-]
-
-[[package]]
-name = "bevy_easings"
-version = "0.9.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bc4d451010b8b55009ded4e320c6d3a2f462dbb079f24adfbc915733724583c9"
-dependencies = [
- "bevy",
- "interpolation",
 ]
 
 [[package]]
@@ -838,6 +829,16 @@ dependencies = [
  "bevy_hierarchy",
  "bevy_math",
  "bevy_reflect",
+]
+
+[[package]]
+name = "bevy_tweening"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6d38b2abf5518df10c3c32ee57a54b9ba7067f3bd1c137b912e286d573962145"
+dependencies = [
+ "bevy",
+ "interpolation",
 ]
 
 [[package]]

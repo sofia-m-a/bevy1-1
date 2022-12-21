@@ -1,10 +1,13 @@
 #![feature(trivial_bounds)]
+#![feature(let_chains)]
+
 // use benimator::*;
 use bevy::{
     prelude::*,
-    render::{camera::ScalingMode, render_resource::WgpuLimits, settings::WgpuSettings},
+    render::{camera::ScalingMode, render_resource::{WgpuLimits, Texture}, settings::WgpuSettings}, sprite::Anchor, transform::TransformSystem,
 };
 use bevy_ecs_tilemap::TilemapPlugin;
+use bevy_tweening::TweeningPlugin;
 // use bevy_pixel_camera::{PixelBorderPlugin, PixelCameraPlugin, PixelCameraBundle};
 use crate::map::brushes;
 use bevy_rapier2d::prelude::*;
@@ -14,14 +17,14 @@ use rand_pcg::Pcg64;
 
 use assets::{
     set_texture_filters_to_nearest, setup_sprites, Animation, AnimationAsset, SpriteAssets,
-    P1_WALK01, TILE_SIZE,
+    P1_WALK01, TILE_SIZE, PIXEL_MODEL_TRANSFORM,
 };
 mod assets;
 mod camera;
 mod map;
 use camera::*;
 use map::{
-    add_level_resource, brushes::Gen, chunk_loader, level_graph::debug_graph, LevelResource,
+    add_level_resource, brushes::Gen, level_graph::debug_graph, LevelResource,
 };
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
@@ -62,6 +65,8 @@ fn main() {
         .add_plugin(LetterboxBorderPlugin {
             color: Color::rgb(0.1, 0.1, 0.1),
         })
+        .add_system_to_stage(CoreStage::PostUpdate, update_sofia_camera.after(TransformSystem::TransformPropagate))
+        .add_plugin(TweeningPlugin)
         .add_system(animate)
         .add_asset::<AnimationAsset>()
         .add_startup_system(add_level_resource)
@@ -133,19 +138,26 @@ fn keyboard_input_system(
         dir += Vec2::new(0.0, 1.0);
     }
 
-    if let Some(mut p) = player.iter_mut().next() {
-        p.0.impulse = (100.0 * dir).into();
+    if dir != Vec2::ZERO && let Some(mut p) = player.iter_mut().next() {
+        p.0.impulse = (1.0 * dir).into();
     }
 }
 
 fn setup(
     mut commands: Commands,
     mut rapier: ResMut<RapierConfiguration>,
+    border: Res<BorderColor>,
     mut color: ResMut<ClearColor>,
 ) {
-    commands
+    let camera = commands
         .spawn(LetterboxCameraBundle::default())
-        .insert(SofiaCamera::default());
+        .insert(SofiaCamera {
+            snap: 0.0,
+            target_center: Vec2::ZERO,
+            target_size: Vec2::new(10.0, 10.0),
+        })
+        .id();
+    spawn_borders(&mut commands, camera, border);
 
     // physics
     rapier.gravity = Vec2::new(0.0, 0.0).into();
@@ -161,29 +173,36 @@ fn setup_player(mut commands: Commands, level: Res<LevelResource>, graphics: Res
         player_size[1] as f32 / TILE_SIZE as f32,
     );
 
+    let player_model = commands.
+        spawn(SpriteSheetBundle {
+            texture_atlas: graphics.player_atlas.clone(),
+            ..Default::default()
+        })
+        .insert(PIXEL_MODEL_TRANSFORM)
+        .insert(VisibilityBundle::default())
+        .insert(graphics.p1_walk_animation.clone())
+        .insert(AnimationState::default())
+        .id();
+    
     let player = commands
         .spawn(Player)
-        .insert(CameraCenter)
+        .insert(CameraGuide::Center)
         .insert(RigidBody::Dynamic)
-        //.insert(Collider::cuboid(w * 0.5, h * 0.5))
+        .insert(Collider::cuboid(w * 0.5, h * 0.5))
         .insert(Ccd::enabled())
         .insert(Sleeping::disabled())
         .insert(LockedAxes::ROTATION_LOCKED)
         .insert(ExternalImpulse::default())
-        .insert(graphics.p1_walk_animation.clone())
-        .insert(AnimationState::default())
-        .insert(SpriteSheetBundle {
-            texture_atlas: graphics.player_atlas.clone(),
-            ..Default::default()
-        })
         .with_children(|parent| {
             parent
-                .spawn(Onscreen)
-                .insert(Transform::from_translation(Vec3::new(-20.0, -10.0, 0.0)));
+                .spawn(CameraGuide::MustBeOnscreen)
+                .insert(TransformBundle::from_transform(Transform::from_translation(Vec3::new(-12.0, -8.0, 0.0))));
             parent
-                .spawn(Onscreen)
-                .insert(Transform::from_translation(Vec3::new(20.0, 10.0, 0.0)));
+                .spawn(CameraGuide::MustBeOnscreen)
+                .insert(TransformBundle::from_transform(Transform::from_translation(Vec3::new(12.0, 8.0, 0.0))));
         })
+        .insert(SpatialBundle::default())
+        .add_child(player_model)
         .id();
     commands.entity(level.0).add_child(player);
 }

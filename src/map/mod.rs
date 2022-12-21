@@ -3,7 +3,7 @@ pub mod level_graph;
 pub mod physics;
 
 use crate::{
-    assets::{SpriteAssets, SHEET_H, SHEET_W, TILE_SIZE},
+    assets::{SpriteAssets, SHEET_H, SHEET_W, TILE_SIZE, PIXEL_MODEL_TRANSFORM},
     camera::SofiaCamera,
     //map::brushes::*,
 };
@@ -13,7 +13,7 @@ use bevy::{
 };
 use bevy_ecs_tilemap::{
     prelude::{
-        TilemapGridSize, TilemapId, TilemapSize, TilemapTexture, TilemapTileSize, TilemapType,
+        TilemapGridSize, TilemapId, TilemapSize, TilemapTexture, TilemapTileSize, TilemapType, fill_tilemap,
     },
     tiles::{TileBundle, TileFlip, TilePos, TileStorage, TileTextureIndex, TileVisible},
     TilemapBundle,
@@ -92,9 +92,7 @@ pub struct LevelResource(pub Entity);
 pub fn add_level_resource(mut commands: Commands) {
     let entity = commands
         .spawn(LevelEntity)
-        .insert(SpatialBundle::from_transform(Transform::from_scale(
-            Vec3::new(1.0 / TILE_SIZE as f32, 1.0 / TILE_SIZE as f32, 1.0),
-        )))
+        .insert(SpatialBundle::default())
         .id();
     commands.insert_resource(LevelResource(entity));
 }
@@ -114,7 +112,7 @@ pub fn load_level(
     let tilemap = commands
         .spawn(Tilemap)
         .insert(SpatialBundle::default())
-        .insert(RigidBody::Fixed)
+        //.insert(RigidBody::Fixed)
         .id();
     commands.entity(level.0).add_child(tilemap);
 
@@ -144,12 +142,12 @@ pub fn load_level(
                 position: tile_pos,
                 texture_index: TileTextureIndex((iy * SHEET_W + ix) as u32),
                 tilemap_id: TilemapId(storage_and_entity[k].1),
-                visible: TileVisible(true),
                 ..Default::default()
             })
             .id();
 
         storage_and_entity[k].0.set(&tile_pos, tile_entity);
+        commands.entity(storage_and_entity[k].1).add_child(tile_entity);
     }
 
     for (k, (storage, tilemap_entity)) in storage_and_entity.into_iter().enumerate() {
@@ -166,108 +164,129 @@ pub fn load_level(
                 x: TILE_SIZE as f32,
                 y: TILE_SIZE as f32,
             },
-            transform: Transform::from_translation(Vec3::new(0.0, 0.0, k as f32)),
+            transform: Transform::from_translation(Vec3::new(0.0, 0.0, k as f32)) * PIXEL_MODEL_TRANSFORM,
             ..Default::default()
         });
     }
 
     for &f in schema.features.iter() {
         if let Some(collider) = collider_for(f) {
-            let collider = commands.spawn(collider).id();
+            //let collider = commands.spawn(collider).id();
             //commands.entity(level).add_child(collider);
         }
     }
+
+    let mut storage = TileStorage::empty(TilemapSize { x: 100, y: 5});
+    let tilemap_entity = commands.spawn_empty().id();
+    fill_tilemap(TileTextureIndex(0), storage.size, TilemapId(tilemap_entity), &mut commands, &mut storage);
+    commands.entity(tilemap).add_child(tilemap_entity);
+    commands.entity(tilemap_entity).insert(TilemapBundle {
+        grid_size: TilemapGridSize {
+            x: TILE_SIZE as f32,
+            y: TILE_SIZE as f32,
+        },
+        map_type: TilemapType::Square,
+        size: storage.size,
+        storage,
+        texture: TilemapTexture::Single(sa.tile_texture.clone()),
+        tile_size: TilemapTileSize {
+            x: TILE_SIZE as f32,
+            y: TILE_SIZE as f32,
+        },
+        transform: Transform::from_translation(Vec3::new(0.0, -5.0, 0.0)) * PIXEL_MODEL_TRANSFORM,
+        ..Default::default()
+    });
 }
 
-pub fn chunk_loader(
-    mut commands: Commands,
-    mut chunks: Query<(Entity, &Chunk, &Transform, &mut TileStorage)>,
-    res_gen: ResMut<Gen>,
-    sa: Res<SpriteAssets>,
-    views: Query<&SofiaCamera>,
-) {
-    if let Some(view) = views.iter().next() {
-        let mut visible: HashSet<Place> = HashSet::from_iter(intersect(view.view));
+// pub fn chunk_loader(
+//     mut commands: Commands,
+//     mut chunks: Query<(Entity, &Chunk, &Transform, &mut TileStorage)>,
+//     res_gen: ResMut<Gen>,
+//     sa: Res<SpriteAssets>,
+//     views: Query<&SofiaCamera>,
+// ) {
+//     if let Some(view) = views.iter().next() {
+//         let mut visible: HashSet<Place> = HashSet::from_iter(intersect(view.view));
 
-        for mut c in chunks.iter_mut() {
-            let place = Place::new(
-                (c.2.translation.x / (CHUNK_SIZE as f32 * TILE_SIZE as f32)) as i32,
-                (c.2.translation.y / (CHUNK_SIZE as f32 * TILE_SIZE as f32)) as i32,
-            );
-            if visible.contains(&place) {
-                visible.remove(&place);
-            } else {
-                // unload
-                for e in c.3.iter_mut() {
-                    if let Some(f) = e {
-                        commands.entity(*f).despawn();
-                    }
-                }
-                commands.entity(c.0).despawn_recursive();
-            }
-        }
+//         for mut c in chunks.iter_mut() {
+//             let place = Place::new(
+//                 (c.2.translation.x / (CHUNK_SIZE as f32 * TILE_SIZE as f32)) as i32,
+//                 (c.2.translation.y / (CHUNK_SIZE as f32 * TILE_SIZE as f32)) as i32,
+//             );
+//             if visible.contains(&place) {
+//                 visible.remove(&place);
+//             } else {
+//                 // unload
+//                 for e in c.3.iter_mut() {
+//                     if let Some(f) = e {
+//                         commands.entity(*f).despawn();
+//                     }
+//                 }
+//                 commands.entity(c.0).despawn_recursive();
+//             }
+//         }
 
-        for &c in visible.iter() {
-            // load
-            let seed = res_gen.seed;
-            let mut pcg = Pcg64::new(
-                (c.x as u128).wrapping_add(seed),
-                (c.y as u128).wrapping_add(seed),
-            );
-            //let tiles = slopey_ground(c, &mut pcg, res_gen.terrain);
-            let tiles: Vec<(Place, Tile)> = Vec::new(); // igloo(Extent::new(0, CHUNK_SIZE as i32), 0, &mut pcg);
+//         for &c in visible.iter() {
+//             // load
+//             let seed = res_gen.seed;
+//             let mut pcg = Pcg64::new(
+//                 (c.x as u128).wrapping_add(seed),
+//                 (c.y as u128).wrapping_add(seed),
+//             );
+//             //let tiles = slopey_ground(c, &mut pcg, res_gen.terrain);
+//             let tiles: Vec<(Place, Tile)> = Vec::new(); // igloo(Extent::new(0, CHUNK_SIZE as i32), 0, &mut pcg);
 
-            let mut storage = TileStorage::empty(TilemapSize {
-                x: CHUNK_SIZE as u32,
-                y: CHUNK_SIZE as u32,
-            });
-            let tilemap_entity = commands.spawn_empty().id();
+//             let mut storage = TileStorage::empty(TilemapSize {
+//                 x: CHUNK_SIZE as u32,
+//                 y: CHUNK_SIZE as u32,
+//             });
+//             let tilemap_entity = commands.spawn_empty().id();
 
-            for (p, t) in tiles {
-                if t == Tile::Air {
-                    continue;
-                }
+//             for (p, t) in tiles {
+//                 if t == Tile::Air {
+//                     continue;
+//                 }
 
-                let tile_pos = TilePos {
-                    x: p.x as u32,
-                    y: p.y as u32,
-                };
-                let (ix, iy) = t.into();
-                let tile_entity = commands
-                    .spawn(TileBundle {
-                        position: tile_pos,
-                        texture_index: TileTextureIndex((iy * SHEET_W + ix) as u32),
-                        tilemap_id: TilemapId(tilemap_entity),
-                        visible: TileVisible(true),
-                        ..Default::default()
-                    })
-                    .id();
+//                 let tile_pos = TilePos {
+//                     x: p.x as u32,
+//                     y: p.y as u32,
+//                 };
+//                 let (ix, iy) = t.into();
+//                 let tile_entity = commands
+//                     .spawn(TileBundle {
+//                         position: tile_pos,
+//                         texture_index: TileTextureIndex((iy * SHEET_W + ix) as u32),
+//                         tilemap_id: TilemapId(tilemap_entity),
+//                         visible: TileVisible(true),
+//                         ..Default::default()
+//                     })
+//                     .id();
 
-                storage.set(&tile_pos, tile_entity);
-            }
+//                 storage.set(&tile_pos, tile_entity);
+//             }
 
-            commands.entity(tilemap_entity).insert(TilemapBundle {
-                grid_size: TilemapGridSize {
-                    x: TILE_SIZE as f32,
-                    y: TILE_SIZE as f32,
-                },
-                map_type: TilemapType::Square,
-                size: storage.size,
-                storage,
-                texture: TilemapTexture::Single(sa.tile_texture.clone()),
-                tile_size: TilemapTileSize {
-                    x: TILE_SIZE as f32,
-                    y: TILE_SIZE as f32,
-                },
-                transform: Transform::from_translation(Vec3::new(
-                    c.x as f32 * CHUNK_SIZE as f32 * TILE_SIZE as f32,
-                    c.y as f32 * CHUNK_SIZE as f32 * TILE_SIZE as f32,
-                    1.0,
-                )),
+//             commands.entity(tilemap_entity).insert(TilemapBundle {
+//                 grid_size: TilemapGridSize {
+//                     x: TILE_SIZE as f32,
+//                     y: TILE_SIZE as f32,
+//                 },
+//                 map_type: TilemapType::Square,
+//                 size: storage.size,
+//                 storage,
+//                 texture: TilemapTexture::Single(sa.tile_texture.clone()),
+//                 tile_size: TilemapTileSize {
+//                     x: TILE_SIZE as f32,
+//                     y: TILE_SIZE as f32,
+//                 },
+//                 transform: Transform::from_translation(Vec3::new(
+//                     c.x as f32 * CHUNK_SIZE as f32 * TILE_SIZE as f32,
+//                     c.y as f32 * CHUNK_SIZE as f32 * TILE_SIZE as f32,
+//                     1.0,
+//                 )),
 
-                visibility: Visibility::VISIBLE,
-                ..Default::default()
-            });
-        }
-    }
-}
+//                 visibility: Visibility::VISIBLE,
+//                 ..Default::default()
+//             });
+//         }
+//     }
+// }

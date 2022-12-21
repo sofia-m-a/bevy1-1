@@ -7,6 +7,7 @@ use extent::Extent;
 use itertools::iproduct;
 use itertools::Itertools;
 use itertools::Position::*;
+use ndarray::s;
 use noise::NoiseFn;
 use noise::OpenSimplex;
 use noise::Seedable;
@@ -1185,7 +1186,7 @@ impl PointDistance for Feature {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct Schema {
     pub features: RTree<Feature>,
 }
@@ -1250,7 +1251,7 @@ pub fn generate_level(gen: &mut Gen) -> Schema {
     ];
 
     let mut x = 50;
-    for i in 0..20 {
+    for _ in 0..20 {
         let z = n_to_enum(gen.zone.get([x as f64, 0.0]));
         let width = ((Zone::CARDINALITY as f64) * n_to_01(gen.zone.get([x as f64, 0.0]))) % 1.0;
         let width = (50.0 * width).floor() as u32 + 20;
@@ -1916,14 +1917,16 @@ pub fn render_level(schema: &Schema) -> ndarray::Array3<Tile> {
 
         array[[i as usize + 1, j as usize + 1, 1]] = main.0;
         if let Some(terrain) = main.1 {
-            array[[i as usize + 1, j as usize + 1, 1]] =
+            array[[i as usize + 1, j as usize + 1, 2]] =
                 Tile::Terrain(terrain, TerrainTile::Cap(LR::R));
         }
         if let Some(terrain) = main.2 {
-            array[[i as usize + 1, j as usize + 1, 1]] =
+            array[[i as usize + 1, j as usize + 1, 3]] =
                 Tile::Terrain(terrain, TerrainTile::Cap(LR::L));
         }
     }
+
+    dbg!(array.slice(s![60..100, 0..5, 1]));
 
     array
 }
