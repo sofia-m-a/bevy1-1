@@ -6,7 +6,7 @@ use bevy::{
     prelude::*,
     render::{camera::ScalingMode, render_resource::{WgpuLimits, Texture}, settings::WgpuSettings}, sprite::Anchor, transform::TransformSystem,
 };
-use bevy_ecs_tilemap::TilemapPlugin;
+use bevy_ecs_tilemap::{TilemapPlugin, prelude::TilemapRenderSettings};
 use bevy_tweening::TweeningPlugin;
 // use bevy_pixel_camera::{PixelBorderPlugin, PixelCameraPlugin, PixelCameraBundle};
 use crate::map::brushes;
@@ -57,6 +57,9 @@ fn main() {
         })
         //.add_plugin(bevy::diagnostic::FrameTimeDiagnosticsPlugin)
         //.add_plugin(bevy::diagnostic::LogDiagnosticsPlugin::default())
+        .insert_resource(TilemapRenderSettings {
+            render_chunk_size: UVec2::new(500, 32),
+        })
         .add_plugin(TilemapPlugin)
         .add_system_to_stage(
             CoreStage::PostUpdate,
