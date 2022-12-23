@@ -1,33 +1,18 @@
 use bevy::prelude::Resource;
-use bevy::prelude::UVec2;
 use enum_iterator::Sequence;
 use itertools::iproduct;
 use itertools::Itertools;
 use itertools::Position;
-use itertools::Position::*;
-use ndarray::s;
 use noise::NoiseFn;
-use noise::OpenSimplex;
-use noise::Seedable;
 use num_derive::FromPrimitive;
 use num_traits::FromPrimitive;
-use num_traits::PrimInt;
-use rand::distributions::uniform::SampleUniform;
-use rand::distributions::WeightedIndex;
-use rand::prelude::Distribution;
-use rand::prelude::SliceRandom;
 use rand::thread_rng;
 use rand::Rng;
-use rand::RngCore;
-use rand::SeedableRng;
-use rand_pcg::Pcg64;
 use ranges::GenericRange;
 use ranges::Ranges;
 use rstar::iterators::LocateAllAtPoint;
 use rstar::iterators::LocateInEnvelopeIntersecting;
-use rstar::iterators::SelectionIterator;
 use rstar::*;
-use std::collections::HashSet;
 use std::ops::Bound;
 use std::ops::RangeBounds;
 
@@ -1425,15 +1410,16 @@ impl Default for Gen {
             .take(octaves_n)
             .map(|i| noise::SuperSimplex::new(i))
             .collect();
+        let p = 0.2;
         let terrain = noise::ScaleBias::new(
             noise::Fbm::new(seed)
                 .set_sources(octaves)
                 .set_octaves(octaves_n)
                 .set_frequency(128.0)
                 .set_lacunarity(2.0)
-                .set_persistence(0.4),
+                .set_persistence(p),
         )
-        .set_scale(1.0 / (2.0 * (1.0 + 0.4 + 0.4*0.4 + 0.4*0.4*0.4)))
+        .set_scale(1.0 / (2.0 * (1.0 + p + p * p + p * p * p)))
         .set_bias(0.5);
         let zone = noise::ScaleBias::new(noise::SuperSimplex::new(seed + octaves_n as u32))
             .set_scale(0.5)
@@ -1456,7 +1442,7 @@ pub fn generate_level(gen: &Gen) -> Schema {
 
     let height = 10;
 
-    let size = 10;
+    let size = 500;
     let mut x = -size;
     while x < size {
         let z = n_to_enum(gen.zone.get([x as f64, 0.0]));
@@ -1723,13 +1709,14 @@ fn bonus_brush(schema: &mut Schema, gen: &Gen, box2: Box2<i32>) {
     // todo
 }
 
+#[derive(Clone, Copy, Debug)]
 struct LayeredTile {
     background: TilingTile,
     midground: TilingTile,
     foreground: TilingTile,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 enum TilingTile {
     Exactly(Tile),
     Ground(GroundCover, Terrain),
@@ -1766,9 +1753,7 @@ fn get_tile(schema: &Schema, gen: &Gen, p: Place) -> LayeredTile {
 
     for &f in schema.at_point(p) {
         match f {
-            Feature::GroundBlock(gc, terrain, _) => {
-                t.midground = TilingTile::Ground(gc, terrain)
-            }
+            Feature::GroundBlock(gc, terrain, _) => t.midground = TilingTile::Ground(gc, terrain),
             Feature::HillBlock {
                 terrain,
                 start_x,
@@ -1916,9 +1901,9 @@ impl TileTilingInfo {
             bl: TilingCorner::None,
             lb: TilingCorner::None,
             lt: TilingCorner::None,
-            left_int:   false,
-            right_int:  false,
-            top_int:    false,
+            left_int: false,
+            right_int: false,
+            top_int: false,
             bottom_int: false,
             terrain,
         }
@@ -1937,32 +1922,64 @@ impl TilingTile {
                         info.left_int = lmr != LMR::L;
                         info.right_int = lmr != LMR::R;
                         info.bottom_int = tmb != TMB::B;
-                        info.tl = if info.top_int && lmr == LMR::L { TilingCorner::Inner } else { TilingCorner::None };
-                        info.tr = if info.top_int && lmr == LMR::R { TilingCorner::Inner } else { TilingCorner::None };
-                        info.rt = if info.right_int && tmb == TMB::T { TilingCorner::Inner } else { TilingCorner::None };
-                        info.rb = if info.right_int && tmb == TMB::B { TilingCorner::Inner } else { TilingCorner::None };
-                        info.br = if info.bottom_int && lmr == LMR::R { TilingCorner::Inner } else { TilingCorner::None };
-                        info.bl = if info.bottom_int && lmr == LMR::L { TilingCorner::Inner } else { TilingCorner::None };
-                        info.lb = if info.left_int && tmb == TMB::B { TilingCorner::Inner } else { TilingCorner::None };
-                        info.lt = if info.left_int && tmb == TMB::T { TilingCorner::Inner } else { TilingCorner::None };
-                    },
+                        info.tl = if info.top_int && lmr == LMR::L {
+                            TilingCorner::Inner
+                        } else {
+                            TilingCorner::None
+                        };
+                        info.tr = if info.top_int && lmr == LMR::R {
+                            TilingCorner::Inner
+                        } else {
+                            TilingCorner::None
+                        };
+                        info.rt = if info.right_int && tmb == TMB::T {
+                            TilingCorner::Inner
+                        } else {
+                            TilingCorner::None
+                        };
+                        info.rb = if info.right_int && tmb == TMB::B {
+                            TilingCorner::Inner
+                        } else {
+                            TilingCorner::None
+                        };
+                        info.br = if info.bottom_int && lmr == LMR::R {
+                            TilingCorner::Inner
+                        } else {
+                            TilingCorner::None
+                        };
+                        info.bl = if info.bottom_int && lmr == LMR::L {
+                            TilingCorner::Inner
+                        } else {
+                            TilingCorner::None
+                        };
+                        info.lb = if info.left_int && tmb == TMB::B {
+                            TilingCorner::Inner
+                        } else {
+                            TilingCorner::None
+                        };
+                        info.lt = if info.left_int && tmb == TMB::T {
+                            TilingCorner::Inner
+                        } else {
+                            TilingCorner::None
+                        };
+                    }
                     TerrainTile::Slope(lr) => {
                         info.bottom_int = true;
                         match lr {
                             LR::L => {
                                 info.right_int = true;
                                 info.bl = TilingCorner::Slope;
-                            },
+                            }
                             LR::R => {
                                 info.left_int = true;
                                 info.br = TilingCorner::Slope;
-                            },
+                            }
                         }
                     }
                     TerrainTile::SlopeInt(lr) => {
-                        info.top_int    = true;
-                        info.left_int   = true;
-                        info.right_int  = true;
+                        info.top_int = true;
+                        info.left_int = true;
+                        info.right_int = true;
                         info.bottom_int = true;
                         match lr {
                             LR::L => {
@@ -1974,29 +1991,29 @@ impl TilingTile {
                                 info.rt = TilingCorner::Slope;
                             }
                         }
-                    },
+                    }
                     TerrainTile::FaceInt(lr, tb) => {
-                        info.top_int    = true;
-                        info.left_int   = true;
-                        info.right_int  = true;
+                        info.top_int = true;
+                        info.left_int = true;
+                        info.right_int = true;
                         info.bottom_int = true;
                         match (lr, tb) {
                             (LR::L, TB::T) => {
                                 info.bl = TilingCorner::Inner;
                                 info.lb = TilingCorner::Inner;
-                            },
+                            }
                             (LR::L, TB::B) => {
                                 info.tl = TilingCorner::Inner;
                                 info.lt = TilingCorner::Inner;
-                            },
-                            (LR::R, TB::T) =>{
+                            }
+                            (LR::R, TB::T) => {
                                 info.br = TilingCorner::Inner;
                                 info.rb = TilingCorner::Inner;
-                            },
-                            (LR::R, TB::B) =>{
+                            }
+                            (LR::R, TB::B) => {
                                 info.tr = TilingCorner::Inner;
                                 info.rt = TilingCorner::Inner;
-                            },
+                            }
                         }
                     }
                     TerrainTile::Single => {
@@ -2014,17 +2031,23 @@ impl TilingTile {
                     }
                     _ => (),
                 }
-                todo!()
+                info
             }),
             TilingTile::Exactly(_) => None,
             TilingTile::Ground(_, terrain) => Some({
                 TileTilingInfo {
-                 top_int    : true,
-                 left_int   : true,
-                 right_int  : true,
-                 bottom_int : true,
-                    tl: TilingCorner::None, tr: TilingCorner::None, rt: TilingCorner::None, rb: TilingCorner::None,
-                    br: TilingCorner::None, bl: TilingCorner::None, lb: TilingCorner::None, lt: TilingCorner::None,
+                    top_int: true,
+                    left_int: true,
+                    right_int: true,
+                    bottom_int: true,
+                    tl: TilingCorner::None,
+                    tr: TilingCorner::None,
+                    rt: TilingCorner::None,
+                    rb: TilingCorner::None,
+                    br: TilingCorner::None,
+                    bl: TilingCorner::None,
+                    lb: TilingCorner::None,
+                    lt: TilingCorner::None,
                     terrain,
                 }
             }),
@@ -2038,24 +2061,29 @@ struct CapInfo {
     right_cap: Option<Terrain>,
 }
 
-fn compute_tiling(
-    array: ndarray::Array2<TilingTile>,
-) -> ndarray::Array2<(Tile, CapInfo)> {
+fn compute_tiling(array: ndarray::Array2<TilingTile>) -> ndarray::Array2<(Tile, CapInfo)> {
     let sx = array.shape()[0];
     let sy = array.shape()[1];
-    let mut array2 = ndarray::Array2::from_elem(
-        [sx + 2, sy + 2],
-        (TilingTile::Exactly(Tile::Air), None));
+    let mut array2 =
+        ndarray::Array2::from_elem([sx, sy], (TilingTile::Exactly(Tile::Air), None));
     for (i, j) in iproduct!(0..sx, 0..sy) {
-        array2[[i + 1, j + 1]] = (array[[i, j]], array[[i, j]].info());
+        array2[[i, j]] = (array[[i, j]], array[[i, j]].info());
     }
-    for (i, j) in iproduct!(0..sx, 0..sy) {
+    for (i, j) in iproduct!(0..(sx-2), 0..(sy-2)) {
         match array2[[i + 1, j + 1]] {
             (TilingTile::Ground(gc, terrain), Some(mut ti)) => {
-                let left = array2[[i, j + 1]]     .1.and_then(|ti| ti.right_int.then_some(ti.terrain));
-                let right = array2[[i + 2, j + 1]].1.and_then(|ti| ti.left_int.then_some(ti.terrain));
-                let top = array2[[i + 1, j + 2]]  .1.and_then(|ti| ti.bottom_int.then_some(ti.terrain));
-                let bottom = array2[[i + 1, j]]   .1.and_then(|ti| ti.top_int.then_some(ti.terrain));
+                let left = array2[[i, j + 1]]
+                    .1
+                    .and_then(|ti| ti.right_int.then_some(ti.terrain));
+                let right = array2[[i + 2, j + 1]]
+                    .1
+                    .and_then(|ti| ti.left_int.then_some(ti.terrain));
+                let top = array2[[i + 1, j + 2]]
+                    .1
+                    .and_then(|ti| ti.bottom_int.then_some(ti.terrain));
+                let bottom = array2[[i + 1, j]]
+                    .1
+                    .and_then(|ti| ti.top_int.then_some(ti.terrain));
 
                 if gc == GroundCover::FullyCovered && left != Some(terrain) {
                     ti.bl = TilingCorner::Inner;
@@ -2079,19 +2107,29 @@ fn compute_tiling(
                 }
 
                 array2[[i + 1, j + 1]].1 = Some(ti);
-            },
-            _ => ()
+            }
+            _ => (),
         }
     }
 
-    let mut out = ndarray::Array2::from_elem([sx, sy], 
-        (Tile::Air, CapInfo { left_cap: None, right_cap: None }));
+    let mut out = ndarray::Array2::from_elem(
+        [sx-2, sy-2],
+        (
+            Tile::Air,
+            CapInfo {
+                left_cap: None,
+                right_cap: None,
+            },
+        ),
+    );
 
-    for (i, j) in iproduct!(0..sx, 0..sy) {
+    for (i, j) in iproduct!(0..(sx-2), 0..(sy-2)) {
         match array2[[i + 1, j + 1]].0 {
             TilingTile::Exactly(t) => out[[i, j]].0 = t,
             TilingTile::Ground(_, terrain) => {
-                let ti = array2[[i + 1, j + 1]].1.unwrap_or(TileTilingInfo::new(terrain));
+                let ti = array2[[i + 1, j + 1]]
+                    .1
+                    .unwrap_or(TileTilingInfo::new(terrain));
                 let lmr = match (ti.left_int, ti.right_int) {
                     (true, false) => LMR::R,
                     (false, true) => LMR::L,
@@ -2109,7 +2147,7 @@ fn compute_tiling(
                     let right = array2[[i + 2, j + 1]].1;
                     let top = array2[[i + 1, j + 2]].1;
                     let bottom = array2[[i + 1, j]].1;
-    
+
                     let tl = merge_corners(
                         left.map(|ti| ti.rt).unwrap_or(TilingCorner::None),
                         top.map(|ti| ti.bl).unwrap_or(TilingCorner::None),
@@ -2128,7 +2166,11 @@ fn compute_tiling(
                     );
 
                     let tt = if tl == TilingCorner::Slope || tr == TilingCorner::Slope {
-                        let lr = if tl == TilingCorner::Slope { LR::L } else { LR::R };
+                        let lr = if tl == TilingCorner::Slope {
+                            LR::L
+                        } else {
+                            LR::R
+                        };
                         TerrainTile::SlopeInt(lr)
                     } else {
                         match (tl, tr, bl, br) {
@@ -2141,22 +2183,31 @@ fn compute_tiling(
                     };
                     Tile::Terrain(terrain, tt)
                 };
-            },
+            }
         }
-        
+
         out[[i, j]].1 = {
             let right_cap = match (array2[[i, j + 1]].1, array2[[i + 1, j + 1]].1) {
                 (None, _) => None,
-                (Some(ti1), Some(ti2)) if ti1.terrain == ti2.terrain && ti1.top_int == ti2.top_int => None,
+                (Some(ti1), Some(ti2))
+                    if ti1.terrain == ti2.terrain && ti1.top_int == ti2.top_int =>
+                {
+                    None
+                }
                 (Some(ti1), _) => (!ti1.top_int).then_some(ti1.terrain),
             };
             let left_cap = match (array2[[i + 2, j + 1]].1, array2[[i + 1, j + 1]].1) {
                 (None, _) => None,
-                (Some(ti1), Some(ti2)) if ti1.terrain == ti2.terrain && ti1.top_int == ti2.top_int => None,
+                (Some(ti1), Some(ti2))
+                    if ti1.terrain == ti2.terrain && ti1.top_int == ti2.top_int =>
+                {
+                    None
+                }
                 (Some(ti1), _) => (!ti1.top_int).then_some(ti1.terrain),
             };
             CapInfo {
-                left_cap, right_cap
+                left_cap,
+                right_cap,
             }
         }
     }
@@ -2165,14 +2216,19 @@ fn compute_tiling(
 }
 
 pub fn render_level(schema: &Schema, gen: &Gen, box2: Box2<i32>) -> ndarray::Array3<Tile> {
+    let extended = Box2 {
+        x: Box1::new(box2.x.lo_incl - 1, box2.x.hi_excl + 1),
+        y: Box1::new(box2.y.lo_incl - 1, box2.y.hi_excl + 1),
+    };
     let shape = [box2.x.size() as usize, box2.y.size() as usize];
-    let mut back = ndarray::Array::from_elem(shape, TilingTile::Exactly(Tile::Air));
-    let mut mid = ndarray::Array::from_elem(shape, TilingTile::Exactly(Tile::Air));
-    let mut fore = ndarray::Array::from_elem(shape, TilingTile::Exactly(Tile::Air));
+    let shape_ex = [extended.x.size() as usize, extended.y.size() as usize];
+    let mut back = ndarray::Array::from_elem(shape_ex, TilingTile::Exactly(Tile::Air));
+    let mut mid = ndarray::Array::from_elem (shape_ex, TilingTile::Exactly(Tile::Air));
+    let mut fore = ndarray::Array::from_elem(shape_ex, TilingTile::Exactly(Tile::Air));
 
-    for (i, j) in iproduct!(box2.x.iter(), box2.y.iter()) {
-        let i_ = (i - box2.x.lo_incl) as usize;
-        let j_ = (j - box2.y.lo_incl) as usize;
+    for (i, j) in iproduct!(extended.x.iter(), extended.y.iter()) {
+        let i_ = (i - extended.x.lo_incl) as usize;
+        let j_ = (j - extended.y.lo_incl) as usize;
 
         let LayeredTile {
             background,
@@ -2187,18 +2243,18 @@ pub fn render_level(schema: &Schema, gen: &Gen, box2: Box2<i32>) -> ndarray::Arr
     let mid2 = compute_tiling(mid);
 
     let mut array = ndarray::Array::from_elem(
-        [box2.x.size() as usize, box2.y.size() as usize, 5],
+        [shape[0], shape[1], 5],
         Tile::Air,
     );
 
     for (i, j) in iproduct!(box2.x.iter(), box2.y.iter()) {
         let i_ = (i - box2.x.lo_incl) as usize;
         let j_ = (j - box2.y.lo_incl) as usize;
-        if let TilingTile::Exactly(t) = back[[i_, j_]] {
+        if let TilingTile::Exactly(t) = back[[i_ + 1, j_ + 1]] {
             array[[i_, j_, 0]] = t;
         }
         array[[i_, j_, 1]] = mid2[[i_, j_]].0;
-        if let TilingTile::Exactly(t) = fore[[i_, j_]] {
+        if let TilingTile::Exactly(t) = fore[[i_ + 1, j_ + 1]] {
             array[[i_, j_, 2]] = t;
         }
         if let Some(terrain) = mid2[[i_, j_]].1.left_cap {
@@ -2210,4 +2266,3 @@ pub fn render_level(schema: &Schema, gen: &Gen, box2: Box2<i32>) -> ndarray::Arr
     }
     array
 }
-
