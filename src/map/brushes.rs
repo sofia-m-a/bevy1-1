@@ -1429,7 +1429,7 @@ impl Default for Gen {
             noise::Fbm::new(seed)
                 .set_sources(octaves)
                 .set_octaves(octaves_n)
-                .set_frequency(32.0)
+                .set_frequency(128.0)
                 .set_lacunarity(2.0)
                 .set_persistence(0.4),
         )
@@ -1882,9 +1882,9 @@ enum TilingCorner {
 fn merge_corners(a: TilingCorner, b: TilingCorner) -> TilingCorner {
     use TilingCorner::*;
     match (a, b) {
+        (None, _) | (_, None) => None,
         (Slope, _) | (_, Slope) => Slope,
-        (Inner, _) | (_, Inner) => Inner,
-        (None, None) => None,
+        (Inner, Inner) => Inner,
     }
 }
 
@@ -1921,42 +1921,6 @@ impl TileTilingInfo {
             top_int:    false,
             bottom_int: false,
             terrain,
-        }
-    }
-
-    fn flip_h(self) -> Self {
-        Self {
-            tl: self.tr,
-            tr: self.tl,
-            rt: self.lt,
-            rb: self.lb,
-            br: self.bl,
-            bl: self.br,
-            lb: self.rb,
-            lt: self.rt,
-            left_int: self.right_int,
-            right_int: self.left_int,
-            top_int: self.top_int,
-            bottom_int: self.bottom_int,
-            terrain: self.terrain,
-        }
-    }
-
-    fn flip_v(self) -> Self {
-        Self {
-            tl: self.bl,
-            tr: self.br,
-            rt: self.rb,
-            rb: self.rt,
-            br: self.tr,
-            bl: self.tl,
-            lb: self.lt,
-            lt: self.lb,
-            left_int: self.left_int,
-            right_int: self.right_int,
-            top_int: self.bottom_int,
-            bottom_int: self.top_int,
-            terrain: self.terrain,
         }
     }
 }
@@ -2053,7 +2017,7 @@ impl TilingTile {
                 todo!()
             }),
             TilingTile::Exactly(_) => None,
-            TilingTile::Ground(_, terrain, _) => Some({
+            TilingTile::Ground(_, terrain) => Some({
                 TileTilingInfo {
                  top_int    : true,
                  left_int   : true,
@@ -2069,18 +2033,6 @@ impl TilingTile {
 }
 
 #[derive(Clone, Copy, Debug)]
-struct TilingInfo {
-    tl: TilingCorner,
-    tr: TilingCorner,
-    bl: TilingCorner,
-    br: TilingCorner,
-    top_face: bool,
-    left_face: bool,
-    right_face: bool,
-    bottom_face: bool,
-}
-
-#[derive(Clone, Copy, Debug)]
 struct CapInfo {
     left_cap: Option<Terrain>,
     right_cap: Option<Terrain>,
@@ -2088,9 +2040,7 @@ struct CapInfo {
 
 fn compute_tiling(
     array: ndarray::Array2<TilingTile>,
-) -> (
-    ndarray::Array2<(Tile, CapInfo)>,
-) {
+) -> ndarray::Array2<(Tile, CapInfo)> {
     let sx = array.shape()[0];
     let sy = array.shape()[1];
     let mut array2 = ndarray::Array2::from_elem(
@@ -2101,315 +2051,121 @@ fn compute_tiling(
     }
     for (i, j) in iproduct!(0..sx, 0..sy) {
         match array2[[i + 1, j + 1]] {
-            (TilingTile::Ground(gc, terrain), Some(ti)) => {
+            (TilingTile::Ground(gc, terrain), Some(mut ti)) => {
                 let left = array2[[i, j + 1]]     .1.and_then(|ti| ti.right_int.then_some(ti.terrain));
                 let right = array2[[i + 2, j + 1]].1.and_then(|ti| ti.left_int.then_some(ti.terrain));
                 let top = array2[[i + 1, j + 2]]  .1.and_then(|ti| ti.bottom_int.then_some(ti.terrain));
                 let bottom = array2[[i + 1, j]]   .1.and_then(|ti| ti.top_int.then_some(ti.terrain));
 
-                ti.bl = if left == Some(terrain) { TilingCorner::None } else { TilingCorner::Inner };
-                ti.tl = if left == Some(terrain) { TilingCorner::None } else { TilingCorner::Inner };
-                
-                ti.br = if right == Some(terrain) { TilingCorner::None } else { TilingCorner::Inner };
-                ti.tr = if right == Some(terrain) { TilingCorner::None } else { TilingCorner::Inner };
-                
-                ti.lt = if top == Some(terrain) { TilingCorner::None } else { TilingCorner::Inner };
-                ti.rt = if top == Some(terrain) { TilingCorner::None } else { TilingCorner::Inner };
+                if gc == GroundCover::FullyCovered && left != Some(terrain) {
+                    ti.bl = TilingCorner::Inner;
+                    ti.tl = TilingCorner::Inner;
+                    ti.left_int = false;
+                }
+                if gc == GroundCover::FullyCovered && right != Some(terrain) {
+                    ti.br = TilingCorner::Inner;
+                    ti.tr = TilingCorner::Inner;
+                    ti.right_int = false;
+                }
+                if gc != GroundCover::Bare && top != Some(terrain) {
+                    ti.lt = TilingCorner::Inner;
+                    ti.rt = TilingCorner::Inner;
+                    ti.top_int = false;
+                }
+                if gc == GroundCover::FullyCovered && bottom != Some(terrain) {
+                    ti.lb = TilingCorner::Inner;
+                    ti.rb = TilingCorner::Inner;
+                    ti.bottom_int = false;
+                }
 
-                ti.lb = if bottom == Some(terrain) { TilingCorner::None } else { TilingCorner::Inner };
-                ti.rb = if bottom == Some(terrain) { TilingCorner::None } else { TilingCorner::Inner };
+                array2[[i + 1, j + 1]].1 = Some(ti);
             },
             _ => ()
         }
     }
 
-    let out = ndarray::Array2::from_elem([sx, sy], 
+    let mut out = ndarray::Array2::from_elem([sx, sy], 
         (Tile::Air, CapInfo { left_cap: None, right_cap: None }));
 
     for (i, j) in iproduct!(0..sx, 0..sy) {
-        let left = array2[[i, j + 1]].1;
-        let right = array2[[i + 2, j + 1]].1;
-        let top = array2[[i + 1, j + 1]].1;
+        match array2[[i + 1, j + 1]].0 {
+            TilingTile::Exactly(t) => out[[i, j]].0 = t,
+            TilingTile::Ground(_, terrain) => {
+                let ti = array2[[i + 1, j + 1]].1.unwrap_or(TileTilingInfo::new(terrain));
+                let lmr = match (ti.left_int, ti.right_int) {
+                    (true, false) => LMR::R,
+                    (false, true) => LMR::L,
+                    (_, _) => LMR::M,
+                };
+                let tmb = match (ti.top_int, ti.bottom_int) {
+                    (true, false) => TMB::B,
+                    (false, true) => TMB::T,
+                    (_, _) => TMB::M,
+                };
+                out[[i, j]].0 = if lmr != LMR::M || tmb != TMB::M {
+                    Tile::Terrain(terrain, TerrainTile::BlockFace(lmr, tmb))
+                } else {
+                    let left = array2[[i, j + 1]].1;
+                    let right = array2[[i + 2, j + 1]].1;
+                    let top = array2[[i + 1, j + 2]].1;
+                    let bottom = array2[[i + 1, j]].1;
+    
+                    let tl = merge_corners(
+                        left.map(|ti| ti.rt).unwrap_or(TilingCorner::None),
+                        top.map(|ti| ti.bl).unwrap_or(TilingCorner::None),
+                    );
+                    let tr = merge_corners(
+                        right.map(|ti| ti.lt).unwrap_or(TilingCorner::None),
+                        top.map(|ti| ti.br).unwrap_or(TilingCorner::None),
+                    );
+                    let bl = merge_corners(
+                        left.map(|ti| ti.rb).unwrap_or(TilingCorner::None),
+                        bottom.map(|ti| ti.tl).unwrap_or(TilingCorner::None),
+                    );
+                    let br = merge_corners(
+                        right.map(|ti| ti.lb).unwrap_or(TilingCorner::None),
+                        bottom.map(|ti| ti.tr).unwrap_or(TilingCorner::None),
+                    );
+
+                    let tt = if tl == TilingCorner::Slope || tr == TilingCorner::Slope {
+                        let lr = if tl == TilingCorner::Slope { LR::L } else { LR::R };
+                        TerrainTile::SlopeInt(lr)
+                    } else {
+                        match (tl, tr, bl, br) {
+                            (TilingCorner::Inner, _, _, _) => TerrainTile::FaceInt(LR::L, TB::T),
+                            (_, TilingCorner::Inner, _, _) => TerrainTile::FaceInt(LR::R, TB::T),
+                            (_, _, TilingCorner::Inner, _) => TerrainTile::FaceInt(LR::L, TB::B),
+                            (_, _, _, TilingCorner::Inner) => TerrainTile::FaceInt(LR::R, TB::B),
+                            _ => TerrainTile::BlockFace(LMR::M, TMB::M),
+                        }
+                    };
+                    Tile::Terrain(terrain, tt)
+                };
+            },
+        }
+        
+        out[[i, j]].1 = {
+            let right_cap = match (array2[[i, j + 1]].1, array2[[i + 1, j + 1]].1) {
+                (None, _) => None,
+                (Some(ti1), Some(ti2)) if ti1.terrain == ti2.terrain && ti1.top_int == ti2.top_int => None,
+                (Some(ti1), _) => (!ti1.top_int).then_some(ti1.terrain),
+            };
+            let left_cap = match (array2[[i + 2, j + 1]].1, array2[[i + 1, j + 1]].1) {
+                (None, _) => None,
+                (Some(ti1), Some(ti2)) if ti1.terrain == ti2.terrain && ti1.top_int == ti2.top_int => None,
+                (Some(ti1), _) => (!ti1.top_int).then_some(ti1.terrain),
+            };
+            CapInfo {
+                left_cap, right_cap
+            }
+        }
     }
 
-    todo!()
-    //let mut out = ndarray::Array2::from_elem(array.raw_dim(), TilingTile::Exactly(Tile::Air));
-
-    // ndarray::Zip::indexed(array.windows([3, 3])).for_each(|(i, j), window| {
-    //     match window[[1, 1]] {
-    //         TilingTile::Ground(gc, terrain, ()) =>
-    //             out[[i + 1, j + 1]] = TilingTile::Ground(
-    //                 gc,
-    //                 terrain,
-    //                 TilingInfo {
-    //                     tl: TilingCorner::None,
-    //                     tr: TilingCorner::None,
-    //                     bl: TilingCorner::None,
-    //                     br: TilingCorner::None,
-    //                     top_face: gc != GroundCover::Bare
-    //                         && !match window[[1, 2]] {
-    //                             TilingTile::Ground(_, terrain2, _) if terrain2 == terrain => true,
-    //                             TilingTile::Exactly(Tile::Terrain(terrain2, tt))
-    //                                 if terrain2 == terrain =>
-    //                             {
-    //                                 match tt {
-    //                                     TerrainTile::BlockFace(_, tmb) if tmb != TMB::B => true,
-    //                                     TerrainTile::FaceInt(_, _)
-    //                                     | TerrainTile::Single
-    //                                     | TerrainTile::SingleBare
-    //                                     | TerrainTile::SlopeInt(_)
-    //                                     | TerrainTile::RockSlope(_, TB::T) => true,
-    //                                     _ => false,
-    //                                 }
-    //                             }
-    //                             _ => false,
-    //                         },
-    //                     bottom_face: gc == GroundCover::FullyCovered
-    //                         && !match window[[1, 0]] {
-    //                             TilingTile::Ground(_, terrain2, _) if terrain2 == terrain => true,
-    //                             TilingTile::Exactly(Tile::Terrain(terrain2, tt))
-    //                                 if terrain2 == terrain =>
-    //                             {
-    //                                 match tt {
-    //                                     TerrainTile::BlockFace(_, tmb) if tmb != TMB::T => true,
-    //                                     TerrainTile::FaceInt(_, _)
-    //                                     | TerrainTile::SlopeInt(_)
-    //                                     | TerrainTile::RockSlope(_, TB::B) => true,
-    //                                     _ => false,
-    //                                 }
-    //                             }
-    //                             _ => false,
-    //                         },
-    //                     left_face: gc == GroundCover::FullyCovered
-    //                         && !match window[[0, 1]] {
-    //                             TilingTile::Ground(_, terrain2, _) if terrain2 == terrain => true,
-    //                             TilingTile::Exactly(Tile::Terrain(terrain2, tt))
-    //                                 if terrain2 == terrain =>
-    //                             {
-    //                                 match tt {
-    //                                     TerrainTile::BlockFace(lmr, _) if lmr != LMR::L => true,
-    //                                     TerrainTile::FaceInt(_, _)
-    //                                     | TerrainTile::SlopeInt(_)
-    //                                     | TerrainTile::RockSlope(LR::R, _) => true,
-    //                                     _ => false,
-    //                                 }
-    //                             }
-    //                             _ => false,
-    //                         },
-    //                     right_face: gc == GroundCover::FullyCovered
-    //                         && !match window[[2, 1]] {
-    //                             TilingTile::Ground(_, terrain2, _) if terrain2 == terrain => true,
-    //                             TilingTile::Exactly(Tile::Terrain(terrain2, tt))
-    //                                 if terrain2 == terrain =>
-    //                             {
-    //                                 match tt {
-    //                                     TerrainTile::BlockFace(lmr, _) if lmr != LMR::R => true,
-    //                                     TerrainTile::FaceInt(_, _)
-    //                                     | TerrainTile::SlopeInt(_)
-    //                                     | TerrainTile::RockSlope(LR::L, _) => true,
-    //                                     _ => false,
-    //                                 }
-    //                             }
-    //                             _ => false,
-    //                         },
-    //                 },
-    //             ),
-    //         TilingTile::Exactly(t) => out[[i + 1, j + 1]] = TilingTile::Exactly(t),
-    //     }
-    // });
-
-    // let mut out_ = out.clone();
-    // ndarray::Zip::indexed(out.windows([2, 2])).for_each(|(i, j), window| {
-    //     let tl = window[[0, 1]];
-    //     let tr = window[[1, 1]];
-    //     let bl = window[[0, 0]];
-    //     let br = window[[1, 0]];
-
-    //     if let TilingTile::Ground(_, terrain, _) = tl {
-    //         let face_h = match tr {
-    //             TilingTile::Exactly(Tile::Terrain(terrain2, tt)) if terrain2 == terrain => match tt
-    //             {
-    //                 TerrainTile::BlockFace(LMR::M, TMB::B)
-    //                 | TerrainTile::BlockFace(LMR::R, TMB::B)
-    //                 | TerrainTile::FaceInt(LR::L, TB::T) => TilingCorner::Inner,
-    //                 _ => TilingCorner::None,
-    //             },
-    //             TilingTile::Ground(_, terrain2, ti) if terrain2 == terrain && ti.bottom_face => {
-    //                 TilingCorner::Inner
-    //             }
-    //             _ => TilingCorner::None,
-    //         };
-    //         let face_v = match bl {
-    //             TilingTile::Exactly(Tile::Terrain(terrain2, tt)) if terrain2 == terrain => match tt
-    //             {
-    //                 TerrainTile::BlockFace(LMR::R, TMB::B)
-    //                 | TerrainTile::BlockFace(LMR::R, TMB::M)
-    //                 | TerrainTile::FaceInt(LR::R, TB::B) => TilingCorner::Inner,
-    //                 TerrainTile::SlopeInt(LR::R) => TilingCorner::Slope,
-    //                 _ => TilingCorner::None,
-    //             },
-    //             TilingTile::Ground(_, terrain2, ti) if terrain2 == terrain && ti.right_face => {
-    //                 TilingCorner::Inner
-    //             }
-    //             _ => TilingCorner::None,
-    //         };
-    //         if let TilingTile::Ground(_, _, ti) = &mut out_[[i, j + 1]] {
-    //             ti.br = merge_corners(face_h, face_v);
-    //         }
-    //     }
-
-    //     if let TilingTile::Ground(_, terrain, _) = tr {
-    //         let face_h = match tl {
-    //             TilingTile::Exactly(Tile::Terrain(terrain2, tt)) if terrain2 == terrain => match tt
-    //             {
-    //                 TerrainTile::BlockFace(LMR::L, TMB::B)
-    //                 | TerrainTile::BlockFace(LMR::M, TMB::B)
-    //                 | TerrainTile::FaceInt(LR::R, TB::T) => TilingCorner::Inner,
-    //                 _ => TilingCorner::None,
-    //             },
-    //             TilingTile::Ground(_, terrain2, ti) if terrain2 == terrain && ti.bottom_face => {
-    //                 TilingCorner::Inner
-    //             }
-    //             _ => TilingCorner::None,
-    //         };
-    //         let face_v = match br {
-    //             TilingTile::Exactly(Tile::Terrain(terrain2, tt)) if terrain2 == terrain => match tt
-    //             {
-    //                 TerrainTile::BlockFace(LMR::L, TMB::B)
-    //                 | TerrainTile::BlockFace(LMR::L, TMB::M)
-    //                 | TerrainTile::FaceInt(LR::L, TB::B) => TilingCorner::Inner,
-    //                 TerrainTile::SlopeInt(LR::L) => TilingCorner::Slope,
-    //                 _ => TilingCorner::None,
-    //             },
-    //             TilingTile::Ground(_, terrain2, ti) if terrain2 == terrain && ti.left_face => {
-    //                 TilingCorner::Inner
-    //             }
-    //             _ => TilingCorner::None,
-    //         };
-    //         if let TilingTile::Ground(_, _, ti) = &mut out_[[i + 1, j + 1]] {
-    //             ti.bl = merge_corners(face_h, face_v);
-    //         }
-    //     }
-
-    //     if let TilingTile::Ground(_, terrain, _) = bl {
-    //         let face_h = match tr {
-    //             TilingTile::Exactly(Tile::Terrain(terrain2, tt)) if terrain2 == terrain => match tt
-    //             {
-    //                 TerrainTile::BlockFace(LMR::M, TMB::T)
-    //                 | TerrainTile::BlockFace(LMR::L, TMB::T)
-    //                 | TerrainTile::FaceInt(LR::L, TB::B) => TilingCorner::Inner,
-    //                 TerrainTile::SlopeInt(LR::L) => TilingCorner::Slope,
-    //                 _ => TilingCorner::None,
-    //             },
-    //             TilingTile::Ground(_, terrain2, ti) if terrain2 == terrain && ti.top_face => {
-    //                 TilingCorner::Inner
-    //             }
-    //             _ => TilingCorner::None,
-    //         };
-    //         let face_v = match bl {
-    //             TilingTile::Exactly(Tile::Terrain(terrain2, tt)) if terrain2 == terrain => match tt
-    //             {
-    //                 TerrainTile::BlockFace(LMR::R, TMB::T)
-    //                 | TerrainTile::BlockFace(LMR::R, TMB::M)
-    //                 | TerrainTile::FaceInt(LR::R, TB::T) => TilingCorner::Inner,
-    //                 TerrainTile::Slope(LR::R) => TilingCorner::Slope,
-    //                 _ => TilingCorner::None,
-    //             },
-    //             TilingTile::Ground(_, terrain2, ti) if terrain2 == terrain && ti.right_face => {
-    //                 TilingCorner::Inner
-    //             }
-    //             _ => TilingCorner::None,
-    //         };
-    //         if let TilingTile::Ground(_, _, ti) = &mut out_[[i, j]] {
-    //             ti.tr = merge_corners(face_h, face_v);
-    //         }
-    //     }
-
-    //     if let TilingTile::Ground(_, terrain, _) = br {
-    //         let face_h = match tr {
-    //             TilingTile::Exactly(Tile::Terrain(terrain2, tt)) if terrain2 == terrain => match tt
-    //             {
-    //                 TerrainTile::BlockFace(LMR::M, TMB::T)
-    //                 | TerrainTile::BlockFace(LMR::R, TMB::T)
-    //                 | TerrainTile::FaceInt(LR::R, TB::B) => TilingCorner::Inner,
-    //                 TerrainTile::SlopeInt(LR::R) => TilingCorner::Slope,
-    //                 _ => TilingCorner::None,
-    //             },
-    //             TilingTile::Ground(_, terrain2, ti) if terrain2 == terrain && ti.top_face => {
-    //                 TilingCorner::Inner
-    //             }
-    //             _ => TilingCorner::None,
-    //         };
-    //         let face_v = match bl {
-    //             TilingTile::Exactly(Tile::Terrain(terrain2, tt)) if terrain2 == terrain => match tt
-    //             {
-    //                 TerrainTile::BlockFace(LMR::L, TMB::T)
-    //                 | TerrainTile::BlockFace(LMR::L, TMB::M)
-    //                 | TerrainTile::FaceInt(LR::L, TB::T) => TilingCorner::Inner,
-    //                 TerrainTile::Slope(LR::L) => TilingCorner::Slope,
-    //                 _ => TilingCorner::None,
-    //             },
-    //             TilingTile::Ground(_, terrain2, ti) if terrain2 == terrain && ti.left_face => {
-    //                 TilingCorner::Inner
-    //             }
-    //             _ => TilingCorner::None,
-    //         };
-    //         if let TilingTile::Ground(_, _, ti) = &mut out_[[i + 1, j]] {
-    //             ti.tl = merge_corners(face_h, face_v);
-    //         }
-    //     }
-    // });
-
-    // let mut out2 = ndarray::Array2::from_elem(
-    //     array.raw_dim(),
-    //     CapInfo {
-    //         left_cap: None,
-    //         right_cap: None,
-    //     },
-    // );
-    // ndarray::Zip::indexed(out.windows([2, 1])).for_each(|(i, j), window| {
-    //     let left_topped = match window[[0, 0]] {
-    //         TilingTile::Ground(_, terrain, ti) => {
-    //             (ti.tr != TilingCorner::None || ti.top_face).then_some(terrain)
-    //         }
-    //         TilingTile::Exactly(Tile::Terrain(terrain, tt)) => match tt {
-    //             TerrainTile::BlockFace(LMR::L, TMB::T)
-    //             | TerrainTile::BlockFace(LMR::M, TMB::T)
-    //             | TerrainTile::SlopeInt(LR::R)
-    //             | TerrainTile::FaceInt(LR::R, TB::B) => Some(terrain),
-    //             _ => None,
-    //         },
-    //         _ => None,
-    //     };
-    //     let right_topped = match window[[1, 0]] {
-    //         TilingTile::Ground(_, terrain, ti) => {
-    //             (ti.tr != TilingCorner::None || ti.top_face).then_some(terrain)
-    //         }
-    //         TilingTile::Exactly(Tile::Terrain(terrain, tt)) => match tt {
-    //             TerrainTile::BlockFace(LMR::R, TMB::T)
-    //             | TerrainTile::BlockFace(LMR::M, TMB::T)
-    //             | TerrainTile::SlopeInt(LR::L)
-    //             | TerrainTile::FaceInt(LR::L, TB::B) => Some(terrain),
-    //             _ => None,
-    //         },
-    //         _ => None,
-    //     };
-
-    //     match (left_topped, right_topped) {
-    //         (Some(a), Some(b)) if a == b => (),
-    //         (None, None) => (),
-    //         (a, b) => {
-    //             out2[[i, j]].right_cap = a;
-    //             out2[[i + 1, j]].left_cap = b;
-    //         }
-    //     }
-    // });
-
-    //(out_, out2)
+    out
 }
 
 pub fn render_level(schema: &Schema, gen: &Gen, box2: Box2<i32>) -> ndarray::Array3<Tile> {
-    let shape = [box2.x.size() as usize + 2, box2.y.size() as usize + 2];
+    let shape = [box2.x.size() as usize, box2.y.size() as usize];
     let mut back = ndarray::Array::from_elem(shape, TilingTile::Exactly(Tile::Air));
     let mut mid = ndarray::Array::from_elem(shape, TilingTile::Exactly(Tile::Air));
     let mut fore = ndarray::Array::from_elem(shape, TilingTile::Exactly(Tile::Air));
@@ -2423,12 +2179,12 @@ pub fn render_level(schema: &Schema, gen: &Gen, box2: Box2<i32>) -> ndarray::Arr
             midground,
             foreground,
         } = get_tile(schema, gen, Place::new(i, j));
-        back[[i_ + 1, j_ + 1]] = background;
-        mid[[i_ + 1, j_ + 1]] = midground;
-        fore[[i_ + 1, j_ + 1]] = foreground;
+        back[[i_, j_]] = background;
+        mid[[i_, j_]] = midground;
+        fore[[i_, j_]] = foreground;
     }
 
-    let (mid_, cap) = add_tiling_info(mid);
+    let mid2 = compute_tiling(mid);
 
     let mut array = ndarray::Array::from_elem(
         [box2.x.size() as usize, box2.y.size() as usize, 5],
@@ -2438,673 +2194,20 @@ pub fn render_level(schema: &Schema, gen: &Gen, box2: Box2<i32>) -> ndarray::Arr
     for (i, j) in iproduct!(box2.x.iter(), box2.y.iter()) {
         let i_ = (i - box2.x.lo_incl) as usize;
         let j_ = (j - box2.y.lo_incl) as usize;
-        if let TilingTile::Exactly(t) = back[[i_ + 1, j_ + 1]] {
+        if let TilingTile::Exactly(t) = back[[i_, j_]] {
             array[[i_, j_, 0]] = t;
         }
-        array[[i_, j_, 1]] = match mid_[[i_ + 1, j_ + 1]] {
-            TilingTile::Exactly(t) => t,
-            TilingTile::Ground(_, terrain, ti) => {
-                let n_corners = u32::from(ti.tl != TilingCorner::None)
-                    + u32::from(ti.tr != TilingCorner::None)
-                    + u32::from(ti.bl != TilingCorner::None)
-                    + u32::from(ti.br != TilingCorner::None);
-                if n_corners == 0 {
-                    let tmb = match (ti.top_face, ti.bottom_face) {
-                        (false, false) => TMB::M,
-                        (true, false) => TMB::T,
-                        (false, true) => TMB::B,
-                        (true, true) => {
-                            //dbg!(ti);
-                            TMB::M
-                        }
-                    };
-                    let lmr = match (ti.left_face, ti.right_face) {
-                        (false, false) => LMR::M,
-                        (true, false) => LMR::L,
-                        (false, true) => LMR::R,
-                        (true, true) => {
-                            //dbg!(ti);
-                            LMR::M
-                        }
-                    };
-                    Tile::Terrain(terrain, TerrainTile::BlockFace(lmr, tmb))
-                } else if n_corners == 1 {
-                    if ti.top_face || ti.bottom_face || ti.left_face || ti.right_face {
-                        //dbg!(ti);
-                    }
-                    use TilingCorner::*;
-                    match (ti.tl, ti.tr, ti.bl, ti.br) {
-                        (Slope, None, None, None) => {
-                            Tile::Terrain(terrain, TerrainTile::SlopeInt(LR::L))
-                        }
-                        (Inner, None, None, None) => {
-                            Tile::Terrain(terrain, TerrainTile::FaceInt(LR::L, TB::B))
-                        }
-                        (None, Slope, None, None) => {
-                            Tile::Terrain(terrain, TerrainTile::SlopeInt(LR::R))
-                        }
-                        (None, Inner, None, None) => {
-                            Tile::Terrain(terrain, TerrainTile::FaceInt(LR::R, TB::B))
-                        }
-                        (None, None, Slope, None) => {
-                            //dbg!(ti);
-                            Tile::BrickBlock
-                        }
-                        (None, None, Inner, None) => {
-                            Tile::Terrain(terrain, TerrainTile::FaceInt(LR::L, TB::T))
-                        }
-                        (None, None, None, Slope) => {
-                            //dbg!(ti);
-                            Tile::BrickBlock
-                        }
-                        (None, None, None, Inner) => {
-                            Tile::Terrain(terrain, TerrainTile::FaceInt(LR::R, TB::T))
-                        }
-                        _ => {
-                            //dbg!(ti);
-                            unreachable!()
-                        }
-                    }
-                } else {
-                    //dbg!(ti);
-                    Tile::BrickBlock
-                }
-            }
-        };
-        if let TilingTile::Exactly(t) = fore[[i_ + 1, j_ + 1]] {
+        array[[i_, j_, 1]] = mid2[[i_, j_]].0;
+        if let TilingTile::Exactly(t) = fore[[i_, j_]] {
             array[[i_, j_, 2]] = t;
         }
-        if let Some(terrain) = cap[[i_ + 1, j_ + 1]].left_cap {
+        if let Some(terrain) = mid2[[i_, j_]].1.left_cap {
             array[[i_, j_, 3]] = Tile::Terrain(terrain, TerrainTile::Cap(LR::L));
         }
-        if let Some(terrain) = cap[[i_ + 1, j_ + 1]].right_cap {
-            array[[i_, j_, 3]] = Tile::Terrain(terrain, TerrainTile::Cap(LR::R));
+        if let Some(terrain) = mid2[[i_, j_]].1.right_cap {
+            array[[i_, j_, 4]] = Tile::Terrain(terrain, TerrainTile::Cap(LR::R));
         }
     }
     array
 }
 
-//     for (i, j) in iproduct!(0..width as i32, 0..height as i32) {
-//         let tl = get_tile(schema, (lo.0 + i - 1, lo.1 + j + 1));
-//         let tm = get_tile(schema, (lo.0 + i + 0, lo.1 + j + 1));
-//         let tr = get_tile(schema, (lo.0 + i + 1, lo.1 + j + 1));
-//         let ml = get_tile(schema, (lo.0 + i - 1, lo.1 + j + 0));
-//         let mr = get_tile(schema, (lo.0 + i + 1, lo.1 + j + 0));
-//         let bl = get_tile(schema, (lo.0 + i - 1, lo.1 + j - 1));
-//         let bm = get_tile(schema, (lo.0 + i + 0, lo.1 + j - 1));
-//         let br = get_tile(schema, (lo.0 + i + 1, lo.1 + j - 1));
-
-//         let this = get_tile(schema, (lo.0 + i, lo.1 + j));
-
-//         #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-//         enum Seam {
-//             Sloped,
-//             Flat,
-//             Internal,
-//             Air,
-//         }
-
-//         fn choose_tile(
-//             gc: GroundCover,
-//             terr: Terrain,
-//             tl: AbstractTile,
-//             top: AbstractTile,
-//             left: AbstractTile,
-//         ) -> (Tile, bool) {
-//             let tl_flat_possible = match top {
-//                 AbstractTile::Exactly(Tile::Terrain(terr2, TerrainTile::BlockFace(_, _)))
-//                 | AbstractTile::Exactly(Tile::Terrain(terr2, TerrainTile::Slope(LR::R)))
-//                 | AbstractTile::Covering(_, terr2)
-//                     if terr2 == terr =>
-//                 {
-//                     false
-//                 }
-//                 _ => true,
-//             };
-
-//             let tl_seam = match tl {
-//                 AbstractTile::Exactly(Tile::Terrain(terr2, TerrainTile::Slope(LR::R)))
-//                     if terr2 == terr =>
-//                 {
-//                     Seam::Sloped
-//                 }
-//                 AbstractTile::Exactly(Tile::Terrain(terr2, TerrainTile::BlockFace(_, _)))
-//                     if terr2 == terr =>
-//                 {
-//                     Seam::Internal
-//                 }
-//                 AbstractTile::Covering(GroundCover::FullyCovered, terr2)
-//                     if terr2 == terr && tl_flat_possible =>
-//                 {
-//                     Seam::Flat
-//                 }
-//                 AbstractTile::Covering(_, terr2) if terr2 == terr => Seam::Internal,
-//                 _ => Seam::Air,
-//             };
-//             let top_seam = match top {
-//                 AbstractTile::Exactly(Tile::Terrain(terr2, TerrainTile::Slope(LR::L)))
-//                     if terr2 == terr =>
-//                 {
-//                     Seam::Sloped
-//                 }
-//                 AbstractTile::Exactly(Tile::Terrain(terr2, TerrainTile::BlockFace(_, _)))
-//                     if terr2 == terr =>
-//                 {
-//                     Seam::Internal
-//                 }
-//                 AbstractTile::Covering(GroundCover::FullyCovered, terr2)
-//                     if terr2 == terr && (tl_seam != Seam::Internal) =>
-//                 {
-//                     Seam::Flat
-//                 }
-//                 AbstractTile::Covering(GroundCover::FullyCovered, terr2)
-//                     if terr2 == terr && (tl_seam == Seam::Internal) =>
-//                 {
-//                     Seam::Internal
-//                 }
-//                 _ => Seam::Air,
-//             };
-//             let left_seam = match left {
-//                 AbstractTile::Exactly(Tile::Terrain(terr2, TerrainTile::Slope(LR::L)))
-//                     if terr2 == terr =>
-//                 {
-//                     Seam::Sloped
-//                 }
-//                 AbstractTile::Covering(_, terr2)
-//                 | AbstractTile::Exactly(Tile::Terrain(terr2, TerrainTile::BlockFace(_, _)))
-//                     if terr2 == terr && tl_seam == Seam::Flat =>
-//                 {
-//                     Seam::Flat
-//                 }
-//                 AbstractTile::Covering(_, terr2)
-//                 | AbstractTile::Exactly(Tile::Terrain(terr2, TerrainTile::BlockFace(_, _)))
-//                     if terr2 == terr && tl_seam == Seam::Sloped =>
-//                 {
-//                     Seam::Sloped
-//                 }
-//                 AbstractTile::Covering(GroundCover::FullyCovered, terr2)
-//                     if terr2 == terr && tl_seam == Seam::Air =>
-//                 {
-//                     Seam::Flat
-//                 }
-//                 AbstractTile::Covering(GroundCover::TopCovered, terr2)
-//                     if terr2 == terr && tl_seam == Seam::Air =>
-//                 {
-//                     Seam::Flat
-//                 }
-//                 AbstractTile::Covering(GroundCover::Bare, terr2) if terr2 == terr => Seam::Internal,
-//                 AbstractTile::Covering(_, terr2) if terr2 == terr => Seam::Internal,
-//                 AbstractTile::Exactly(Tile::Terrain(terr2, TerrainTile::BlockFace(_, _)))
-//                     if terr2 == terr =>
-//                 {
-//                     Seam::Internal
-//                 }
-//                 _ => Seam::Air,
-//             };
-
-//             use Seam::*;
-//             let (this_seam, end_cap, top_cover, left_cover) = match (top_seam, left_seam) {
-//                 (Sloped, Flat) | (Sloped, Sloped) | (Flat, Sloped) => {
-//                     (Seam::Sloped, false, false, false)
-//                 }
-//                 (Flat, Flat) => (Seam::Flat, false, false, false),
-//                 (Sloped, Internal) | (Flat, Internal) | (Internal, Internal) => {
-//                     (Seam::Internal, false, false, false)
-//                 }
-//                 (Internal, Sloped) | (Internal, Flat) => (Seam::Internal, true, false, false),
-//                 (Air, Flat) | (Air, Sloped) => (
-//                     Seam::Internal,
-//                     gc == GroundCover::Bare,
-//                     gc != GroundCover::Bare,
-//                     false,
-//                 ),
-//                 (Flat, Air) | (Sloped, Air) | (Internal, Air) => (
-//                     Seam::Internal,
-//                     false,
-//                     false,
-//                     gc == GroundCover::FullyCovered,
-//                 ),
-//                 (Air, Internal) => (Seam::Internal, false, gc != GroundCover::Bare, false),
-//                 (Air, Air) => (
-//                     Seam::Internal,
-//                     false,
-//                     gc != GroundCover::Bare,
-//                     gc == GroundCover::FullyCovered,
-//                 ),
-//             };
-
-//             let t = if this_seam == Seam::Sloped {
-//                 TerrainTile::SlopeInt(LR::L)
-//             } else if this_seam == Seam::Flat {
-//                 TerrainTile::FaceInt(LR::L, TB::T)
-//             } else {
-//                 TerrainTile::BlockFace(
-//                     if left_cover { LMR::L } else { LMR::M },
-//                     if top_cover { TMB::T } else { TMB::M },
-//                 )
-//             };
-
-//             (Tile::Terrain(terr, t), end_cap)
-//         }
-
-//         fn flip(t: Tile, lr: bool, tb: bool) -> Tile {
-//             let flip_lmr = |lmr| match lmr {
-//                 LMR::L if lr => LMR::R,
-//                 LMR::R if lr => LMR::L,
-//                 _ => lmr,
-//             };
-//             let flip_tmb = |tmb| match tmb {
-//                 TMB::T if tb => TMB::B,
-//                 TMB::B if tb => TMB::T,
-//                 _ => tmb,
-//             };
-//             let flip_lr = |l_r| match l_r {
-//                 LR::L if lr => LR::R,
-//                 LR::R if lr => LR::L,
-//                 _ => l_r,
-//             };
-//             let flip_tb = |t_b| match t_b {
-//                 TB::T if tb => TB::B,
-//                 TB::B if tb => TB::T,
-//                 _ => t_b,
-//             };
-
-//             match t {
-//                 Tile::Terrain(terrain, TerrainTile::BlockFace(lmr, tmb)) => Tile::Terrain(
-//                     terrain,
-//                     TerrainTile::BlockFace(flip_lmr(lmr), flip_tmb(tmb)),
-//                 ),
-//                 Tile::Terrain(terrain, TerrainTile::BlockLedge(lr)) => {
-//                     Tile::Terrain(terrain, TerrainTile::BlockLedge(flip_lr(lr)))
-//                 }
-//                 Tile::Terrain(terrain, TerrainTile::Cap(lr)) => {
-//                     Tile::Terrain(terrain, TerrainTile::Cap(flip_lr(lr)))
-//                 }
-//                 Tile::Terrain(terrain, TerrainTile::FaceInt(lr, tb)) => {
-//                     Tile::Terrain(terrain, TerrainTile::FaceInt(flip_lr(lr), flip_tb(tb)))
-//                 }
-//                 Tile::Terrain(terrain, TerrainTile::Half(a, lmr)) => {
-//                     Tile::Terrain(terrain, TerrainTile::Half(a, flip_lmr(lmr)))
-//                 }
-//                 Tile::Terrain(terrain, TerrainTile::OverLedge(lr)) => {
-//                     Tile::Terrain(terrain, TerrainTile::OverLedge(flip_lr(lr)))
-//                 }
-//                 Tile::Terrain(terrain, TerrainTile::RockSlope(lr, tb)) => {
-//                     Tile::Terrain(terrain, TerrainTile::RockSlope(flip_lr(lr), flip_tb(tb)))
-//                 }
-//                 Tile::Terrain(terrain, TerrainTile::RoundLedge(lr)) => {
-//                     Tile::Terrain(terrain, TerrainTile::RoundLedge(flip_lr(lr)))
-//                 }
-//                 Tile::Terrain(terrain, TerrainTile::Slope(lr)) => {
-//                     Tile::Terrain(terrain, TerrainTile::Slope(flip_lr(lr)))
-//                 }
-//                 Tile::Terrain(terrain, TerrainTile::SlopeInt(lr)) => {
-//                     Tile::Terrain(terrain, TerrainTile::SlopeInt(flip_lr(lr)))
-//                 }
-//                 Tile::Terrain(terrain, TerrainTile::SlopeLedge(lr)) => {
-//                     Tile::Terrain(terrain, TerrainTile::SlopeLedge(flip_lr(lr)))
-//                 }
-//                 t => t,
-//             }
-//         }
-
-//         fn flip_2(t: AbstractTile, lr: bool, tb: bool) -> AbstractTile {
-//             match t {
-//                 AbstractTile::Exactly(t) => AbstractTile::Exactly(flip(t, lr, tb)),
-//                 cov => cov,
-//             }
-//         }
-
-//         let main = match this {
-//             AbstractTile::Exactly(Tile::Terrain(terr, TerrainTile::BlockFace(LMR::M, TMB::M))) => {
-//                 Err((GroundCover::Bare, terr))
-//             }
-//             AbstractTile::Covering(gc, terr) => Err((gc, terr)),
-//             AbstractTile::Exactly(t) => Ok(t),
-//         };
-
-//         let main = match main {
-//             Ok(t) => (t, None, None),
-//             Err((gc, terr)) => {
-//                 let tlo = choose_tile(
-//                     gc,
-//                     terr,
-//                     flip_2(tl, false, false),
-//                     flip_2(tm, false, false),
-//                     flip_2(ml, false, false),
-//                 );
-//                 let tro = choose_tile(
-//                     gc,
-//                     terr,
-//                     flip_2(tr, true, false),
-//                     flip_2(tm, true, false),
-//                     flip_2(mr, true, false),
-//                 );
-//                 let blo = choose_tile(
-//                     gc,
-//                     terr,
-//                     flip_2(bl, false, true),
-//                     flip_2(bm, false, true),
-//                     flip_2(ml, false, true),
-//                 );
-//                 let bro = choose_tile(
-//                     gc,
-//                     terr,
-//                     flip_2(br, true, true),
-//                     flip_2(bm, true, true),
-//                     flip_2(mr, true, true),
-//                 );
-
-//                 let (left_cap, right_cap) = (tlo.1, tro.1);
-
-//                 fn merge(t1: Tile, t2: Tile) -> Tile {
-//                     let out = match (t1, t2) {
-//                         (
-//                             Tile::Terrain(t, TerrainTile::BlockFace(lmr1, tmb1)),
-//                             Tile::Terrain(_, TerrainTile::BlockFace(lmr2, tmb2)),
-//                         ) => Tile::Terrain(
-//                             t,
-//                             TerrainTile::BlockFace(
-//                                 match (lmr1, lmr2) {
-//                                     (LMR::M, x) | (x, LMR::M) => x,
-//                                     _ => lmr1,
-//                                 },
-//                                 match (tmb1, tmb2) {
-//                                     (TMB::M, x) | (x, TMB::M) => x,
-//                                     _ => tmb1,
-//                                 },
-//                             ),
-//                         ),
-//                         (Tile::Terrain(_, TerrainTile::SlopeInt(_)), _) => t1,
-//                         (_, Tile::Terrain(_, TerrainTile::SlopeInt(_))) => t2,
-//                         (Tile::Terrain(_, TerrainTile::FaceInt(_, _)), _) => t1,
-//                         (_, Tile::Terrain(_, TerrainTile::FaceInt(_, _))) => t2,
-//                         _ => t1,
-//                     };
-//                     out
-//                 }
-
-//                 let out = (
-//                     merge(
-//                         tlo.0,
-//                         merge(
-//                             flip(tro.0, true, false),
-//                             merge(flip(blo.0, false, true), flip(bro.0, true, true)),
-//                         ),
-//                     ),
-//                     left_cap.then_some(terr),
-//                     right_cap.then_some(terr),
-//                 );
-
-//                 out
-//             }
-//         };
-
-//         array[[i as usize + 1, j as usize + 1, 1]] = main.0;
-//         if let Some(terrain) = main.1 {
-//             array[[i as usize + 1, j as usize + 1, 2]] =
-//                 Tile::Terrain(terrain, TerrainTile::Cap(LR::R));
-//         }
-//         if let Some(terrain) = main.2 {
-//             array[[i as usize + 1, j as usize + 1, 3]] =
-//                 Tile::Terrain(terrain, TerrainTile::Cap(LR::L));
-//         }
-//     }
-
-//     array
-// }
-
-// fn place_bonuses(gen: &mut Gen, schema: &mut Schema) {
-//     let ground = schema
-//         .features
-//         .iter()
-//         .filter_map(|&f| match f {
-//             Feature::FlatGround(start, l) => Some((start, l)),
-//             _ => None,
-//         })
-//         .collect::<Vec<_>>();
-//     for (p, l) in ground {
-//         let run_length = f64::max((l as f64) * n_to_01(gen.zone.get([p.x as f64, 2.0])), 0.0);
-//         let run_length = run_length.floor() as u32;
-//         let height = n_to_01(gen.zone.get([p.x as f64, 2.0])) * 4.0 + 2.0;
-//         let height = height.floor() as u32;
-//         if run_length != 0 {
-//             let start = (l / 2) - (run_length / 2);
-//             schema.features.insert(Feature::BrickBonus(Rect(
-//                 p + Place::new(start as i32, height as i32),
-//                 UVec2::new(run_length, 0),
-//             )));
-//         }
-//     }
-// }
-
-// #[derive(Clone, Copy, Debug)]
-// enum AbstractTile {
-//     Exactly(Tile),
-//     Covering(GroundCover, Terrain),
-// }
-
-// pub fn generate_level(gen: &mut Gen, fl: &mut FeatureList) {
-//     let mut x = 0;
-//     for i in 0..20 {
-//         let height = (6.0 * (gen.terrain.get([x as f64, 0.0]) + 1.0)).floor() as u32;
-//         let width = gen.rng.gen_range(0..=8);
-//         let terrain_type = Terrain::from_u32(((Terrain::CARDINALITY as f64)*0.5*(gen.zone.get([x as f64 / 500.0, 1.0]) + 1.0)).floor() as u32);
-//         fl.add(Feature::CoveredGround(
-//             terrain_type.unwrap_or(Terrain::Grass), Rect(Place::new(x, 0), UVec2::new(width, height))
-//         ));
-//         x += width as i32
-//     }
-// }
-
-// pub fn dress_level(fl: &FeatureList) -> ndarray::Array3<Tile> {
-//     let mut arr = ndarray::Array3::from_elem(
-//         [fl.boundary.1.x as usize + 2, fl.boundary.1.y as usize + 2, 4], Tile::Air);
-//     for &f in fl.features.iter() {
-//         match f {
-//             Feature::CoveredGround(t, r) => {
-//                 for (i, j) in iproduct!(0..r.1.x, 0..r.1.y) {
-//                     arr[[
-//                         1 + (r.0.x - fl.boundary.0.x + i as i32) as usize,
-//                         1 + (r.0.y - fl.boundary.0.y + j as i32) as usize,
-//                         1
-//                     ]] = Tile::Terrain(t, TerrainTile::BlockFace(LMR::M, TMB::M));
-//                 }
-//             }
-//         }
-//     }
-
-//     let mut arr2 = ndarray::Array3::from_elem(
-//         [fl.boundary.1.x as usize + 2, fl.boundary.1.y as usize + 2, 4], Tile::Air);
-//     let mut arr2c = arr2.slice_mut(ndarray::s!(1..-1, 1..-1, ..));
-//     ndarray::Zip::indexed(arr.windows([3, 3, 1])).for_each(|(i, j, k), s_| {
-//         let s = s_.index_axis(ndarray::Axis(2), 0);
-
-//         fn int_block(t: Tile) -> Option<Terrain> {
-//             if let Tile::Terrain(style, TerrainTile::BlockFace(LMR::M, TMB::M)) = t {
-//                 Some(style)
-//             } else {
-//                 None
-//             }
-//         }
-
-//         if let Some(style) = int_block(s[[1, 1]]) {
-//             let top = int_block(s[[1, 2]]) == Some(style);
-//             let bottom = int_block(s[[1, 0]]) == Some(style);
-//             let left = int_block(s[[0, 1]]) == Some(style);
-//             let right = int_block(s[[2, 1]]) == Some(style);
-//             let tl = int_block(s[[0, 2]]) == Some(style);
-//             let tr = int_block(s[[2, 2]]) == Some(style);
-//             let bl = int_block(s[[0, 0]]) == Some(style);
-//             let br = int_block(s[[2, 0]]) == Some(style);
-
-//             let lmr = match (left, right) {
-//                 (true, true) => Some(LMR::M),
-//                 (true, false) => Some(LMR::R),
-//                 (false, true) => Some(LMR::L),
-//                 (false, false) => None
-//             };
-//             let tmb = match (top, bottom) {
-//                 (true, true) => Some(TMB::M),
-//                 (true, false) => Some(TMB::B),
-//                 (false, true) => Some(TMB::T),
-//                 (false, false) => None
-//             };
-//             let tt = match (lmr, tmb) {
-//                 (Some(LMR::M), Some(TMB::M)) => {
-//                     if !tl as u32 + !tr as u32 + !bl as u32 + !br as u32 > 1 {
-//                         TerrainTile::Jagged
-//                     } else if !tl { TerrainTile::FaceInt(LR::L, TB::T) }
-//                     else if !tr { TerrainTile::FaceInt(LR::R, TB::T) }
-//                     else if !bl { TerrainTile::FaceInt(LR::L, TB::B) }
-//                     else if !br { TerrainTile::FaceInt(LR::R, TB::B) }
-//                     else { TerrainTile::BlockFace(LMR::M, TMB::M) }
-//                 },
-//                 (Some(lmr), Some(tmb)) => TerrainTile::BlockFace(lmr, tmb),
-//                 (None, Some(TMB::T)) => TerrainTile::Single,
-//                 (None, Some(_)) => TerrainTile::BlockFace(LMR::M, TMB::M),
-//                 (Some(LMR::L), None) => TerrainTile::BlockLedge(LR::L),
-//                 (Some(LMR::M), None) =>  TerrainTile::BlockFace(LMR::M, TMB::T),
-//                 (Some(LMR::R), None) => TerrainTile::BlockLedge(LR::R),
-//                 (None, None) => TerrainTile::Block
-//             };
-
-//             arr2c[[i, j, 1]] = Tile::Terrain(style, tt);
-//         }
-//     });
-//     arr2
-// }
-
-// DEPRECATED
-// fn pick_extent(ground: Extent<i32>, bounds: Option<Extent<i32>>, gen: &mut Pcg64) -> Extent<i32> {
-//     if let (Some(lo), Some(hi)) = (ground.lo(), ground.hi()) {
-//         let min_width = bounds.and_then(|e| e.lo()).unwrap_or(0);
-//         let max_width = bounds.and_then(|e| e.hi()).unwrap_or(ground.len());
-//         let width = gen.gen_range(min_width..=max_width);
-//         let start = gen.gen_range(lo..=hi - width);
-//         let end = start + width;
-//         Extent::new(start, end)
-//     } else {
-//         ground
-//     }
-// }
-
-// pub fn igloo(ground: Extent<i32>, height: i32, gen: &mut Pcg64) -> Vec<(Place, Tile)> {
-//     let extent = pick_extent(ground, Some(Extent::new(2, 4)), gen);
-//     let d_height = i32::min(extent.len(), 4);
-//     let top = gen.gen_range(height + 1..height + d_height);
-//     let door = range(gen, extent);
-
-//     let mut v = Vec::new();
-//     for (i, j) in iproduct!(
-//         extent.iter().with_position(),
-//         Extent::new(height, top).iter().with_position()
-//     ) {
-//         let t = match (i, j) {
-//             (First(i), Last(j)) => Tile::IglooTop(LMR::L),
-//             (Middle(i), Last(j)) => Tile::IglooTop(LMR::M),
-//             (Last(i), Last(j)) => Tile::IglooTop(LMR::R),
-//             _ => {
-//                 if i.into_inner() == door && j.into_inner() == height {
-//                     Tile::IglooDoor
-//                 } else {
-//                     *[Tile::IglooInterior(false), Tile::IglooInterior(true)]
-//                         .choose(gen)
-//                         .unwrap()
-//                 }
-//             }
-//         };
-//         v.push((Place::new(i.into_inner(), j.into_inner()), t));
-//     }
-//     v
-// }
-
-// pub fn heightmap_ground(start: Place, gen: &mut Pcg64, s: OpenSimplex) -> Vec<(Place, Tile)> {
-//     let mut heights = Vec::new();
-
-//     let shift = |x| 1.0 + ((x + 1.0) / 2.0) * 10.0;
-
-//     for i in 0..CHUNK_SIZE {
-//         heights.push(shift(s.get([start.x as f64 + i as f64, start.y as f64])));
-//     }
-
-//     let mut v = Vec::new();
-//     for (i, h) in heights.iter().copied().enumerate() {
-//         let h_ = h.ceil() as usize;
-//         for j in 0..h_ {
-//             let tile = if j == h_ - 1 {
-//                 TerrainTile::BlockFace(LMR::M, TMB::T)
-//             } else {
-//                 TerrainTile::BlockFace(LMR::M, TMB::M)
-//             };
-//             v.push((
-//                 Place::new( i as i32, j as i32),
-//                 Tile::Terrain(Terrain::Dirt, tile),
-//             ));
-//         }
-//     }
-
-//     v
-// }
-
-// pub fn slopey_ground(start: Place, gen: &mut Pcg64, s: OpenSimplex) -> Vec<(Place, Tile)> {
-//     #[derive(Clone, Copy, PartialEq, Eq)]
-//     enum Angle {
-//         A0,
-//         A45,
-//         A90,
-//         N45,
-//         N90,
-//     }
-
-//     let mut heights = Vec::new();
-//     let mut height = 0;
-//     let weights: WeightedIndex<usize> = WeightedIndex::new(&[15, 3, 1, 3, 1]).unwrap();
-
-//     for _ in 0..=8 {
-//         let length: usize = gen.gen_range(1..=5);
-//         let angle =
-//             [Angle::A0, Angle::A45, Angle::A90, Angle::N45, Angle::N90][weights.sample(gen)];
-
-//         if heights.len() >= CHUNK_SIZE {
-//             break;
-//         }
-
-//         for _ in 0..length {
-//             height += match angle {
-//                 Angle::A0 => 0,
-//                 Angle::A45 => 1,
-//                 Angle::A90 => 3,
-//                 Angle::N45 => -1,
-//                 Angle::N90 => -3,
-//             };
-//             height = 0.max(height);
-//             heights.push((height, angle));
-//         }
-//     }
-
-//     let mut v = Vec::new();
-//     for (i, (h, a)) in heights.iter().copied().enumerate() {
-//         for j in 0..h {
-//             let tile = if j == h - 1 {
-//                 match a {
-//                     Angle::A45 => TerrainTile::Slope(LR::L),
-//                     Angle::N45 => TerrainTile::Slope(LR::R),
-//                     _ => TerrainTile::BlockFace(LMR::M, TMB::T),
-//                 }
-//             } else if j == h - 2 && a == Angle::A45 {
-//                 TerrainTile::SlopeInt(LR::L)
-//             } else if j == h - 2 && a == Angle::N45 {
-//                 TerrainTile::SlopeInt(LR::R)
-//             } else {
-//                 TerrainTile::BlockFace(LMR::M, TMB::M)
-//             };
-//             v.push((
-//                 Place::new(i as i32, j),
-//                 Tile::Terrain(Terrain::Dirt, tile),
-//             ));
-//         }
-//     }
-
-//     v
-// }
