@@ -221,8 +221,8 @@ dependencies = [
  "bevy_tweening",
  "big-brain",
  "bitflags",
+ "either",
  "enum-iterator",
- "extent",
  "interpolation",
  "itertools",
  "iyes_loopless",
@@ -234,6 +234,7 @@ dependencies = [
  "petgraph",
  "rand 0.8.5",
  "rand_pcg",
+ "ranges",
  "rstar",
 ]
 
@@ -1485,15 +1486,6 @@ name = "event-listener"
 version = "2.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0206175f82b8d6bf6652ff7d71a1e27fd2e4efde587fd368662814d6ec1d9ce0"
-
-[[package]]
-name = "extent"
-version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "75ea07d641a26754bcd4084b33a1ea51827e188114044a2caaac66f213d7e465"
-dependencies = [
- "num-traits",
-]
 
 [[package]]
 name = "fastrand"
@@ -2914,6 +2906,12 @@ name = "range-alloc"
 version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "63e935c45e09cc6dcf00d2f0b2d630a58f4095320223d47fc68918722f0538b6"
+
+[[package]]
+name = "ranges"
+version = "0.3.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f781d391cd4838df77e09fd26e33a87e0ac9bf2edf6ff770cfc65f83d50e3948"
 
 [[package]]
 name = "rapier2d"

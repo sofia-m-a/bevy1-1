@@ -1,31 +1,36 @@
 #![feature(trivial_bounds)]
 #![feature(let_chains)]
+#![feature(exclusive_range_pattern)]
 
 // use benimator::*;
 use bevy::{
     prelude::*,
-    render::{camera::ScalingMode, render_resource::{WgpuLimits, Texture}, settings::WgpuSettings}, sprite::Anchor, transform::TransformSystem,
+    render::{
+        camera::ScalingMode,
+        render_resource::{Texture, WgpuLimits},
+        settings::WgpuSettings,
+    },
+    sprite::Anchor,
+    transform::TransformSystem,
 };
-use bevy_ecs_tilemap::{TilemapPlugin, prelude::TilemapRenderSettings};
+use bevy_ecs_tilemap::{prelude::TilemapRenderSettings, TilemapPlugin};
 use bevy_tweening::TweeningPlugin;
 // use bevy_pixel_camera::{PixelBorderPlugin, PixelCameraPlugin, PixelCameraBundle};
 use crate::map::brushes;
 use bevy_rapier2d::prelude::*;
-use extent::Extent;
 use iyes_loopless::prelude::*;
 use rand_pcg::Pcg64;
 
 use assets::{
     set_texture_filters_to_nearest, setup_sprites, Animation, AnimationAsset, SpriteAssets,
-    P1_WALK01, TILE_SIZE, PIXEL_MODEL_TRANSFORM,
+    P1_WALK01, PIXEL_MODEL_TRANSFORM, TILE_SIZE,
 };
 mod assets;
 mod camera;
+mod helpers;
 mod map;
 use camera::*;
-use map::{
-    add_level_resource, brushes::Gen, level_graph::debug_graph, LevelResource,
-};
+use map::{add_level_resource, brushes::Gen, level_graph::debug_graph, LevelResource};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
 enum GameState {
@@ -68,7 +73,10 @@ fn main() {
         .add_plugin(LetterboxBorderPlugin {
             color: Color::rgb(0.1, 0.1, 0.1),
         })
-        .add_system_to_stage(CoreStage::PostUpdate, update_sofia_camera.after(TransformSystem::TransformPropagate))
+        .add_system_to_stage(
+            CoreStage::PostUpdate,
+            update_sofia_camera.after(TransformSystem::TransformPropagate),
+        )
         .add_plugin(TweeningPlugin)
         .add_system(animate)
         .add_asset::<AnimationAsset>()
@@ -82,12 +90,12 @@ fn main() {
             ConditionSet::new()
                 .with_system(setup)
                 .with_system(setup_player)
-                .with_system(map::load_level)
                 .into(),
         )
         .add_system_set(
             ConditionSet::new()
                 .run_in_state(GameState::Level)
+                .with_system(map::chunk_loader)
                 .with_system(keyboard_input_system)
                 .into(), //.with_system(chunk_loader),
         )
@@ -176,8 +184,8 @@ fn setup_player(mut commands: Commands, level: Res<LevelResource>, graphics: Res
         player_size[1] as f32 / TILE_SIZE as f32,
     );
 
-    let player_model = commands.
-        spawn(SpriteSheetBundle {
+    let player_model = commands
+        .spawn(SpriteSheetBundle {
             texture_atlas: graphics.player_atlas.clone(),
             ..Default::default()
         })
@@ -186,7 +194,7 @@ fn setup_player(mut commands: Commands, level: Res<LevelResource>, graphics: Res
         .insert(graphics.p1_walk_animation.clone())
         .insert(AnimationState::default())
         .id();
-    
+
     let player = commands
         .spawn(Player)
         .insert(CameraGuide::Center)
@@ -199,10 +207,14 @@ fn setup_player(mut commands: Commands, level: Res<LevelResource>, graphics: Res
         .with_children(|parent| {
             parent
                 .spawn(CameraGuide::MustBeOnscreen)
-                .insert(TransformBundle::from_transform(Transform::from_translation(Vec3::new(-12.0, -8.0, 0.0))));
+                .insert(TransformBundle::from_transform(
+                    Transform::from_translation(Vec3::new(-12.0, -8.0, 0.0)),
+                ));
             parent
                 .spawn(CameraGuide::MustBeOnscreen)
-                .insert(TransformBundle::from_transform(Transform::from_translation(Vec3::new(12.0, 8.0, 0.0))));
+                .insert(TransformBundle::from_transform(
+                    Transform::from_translation(Vec3::new(12.0, 8.0, 0.0)),
+                ));
         })
         .insert(SpatialBundle::default())
         .add_child(player_model)

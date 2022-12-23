@@ -41,12 +41,12 @@ use super::brushes::*;
 //     }
 // }
 
-pub fn collider_for(f: Feature) -> Option<Collider> {
-    match f {
-        Feature::Tile(p, _) => Some(Collider::cuboid(1.0, 1.0)),
-        Feature::BoxBonus(r) => Some(Collider::cuboid(r.1.x as f32, r.1.y as f32)),
-        Feature::BrickBonus(r) => Some(Collider::cuboid(r.1.x as f32, r.1.y as f32)),
-        Feature::GroundBlock(_, _, r) => Some(Collider::cuboid(r.1.x as f32, r.1.y as f32)),
-        _ => None,
-    }
-}
+// pub fn collider_for(f: Feature) -> Option<Collider> {
+//     match f {
+//         Feature::Tile(p, _) => Some(Collider::cuboid(1.0, 1.0)),
+//         Feature::BoxBonus(r) => Some(Collider::cuboid(r.1.x as f32, r.1.y as f32)),
+//         Feature::BrickBonus(r) => Some(Collider::cuboid(r.1.x as f32, r.1.y as f32)),
+//         Feature::GroundBlock(_, _, r) => Some(Collider::cuboid(r.1.x as f32, r.1.y as f32)),
+//         _ => None,
+//     }
+// }

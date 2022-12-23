@@ -3,7 +3,11 @@ use bevy::{prelude::*, reflect::TypeUuid, render::render_resource::TextureUsages
 pub const TILE_SIZE: u32 = 70;
 pub const SHEET_W: u16 = 28;
 pub const SHEET_H: u16 = 59;
-pub const PIXEL_MODEL_TRANSFORM: Transform = Transform::from_scale(Vec3::new(1.0 / TILE_SIZE as f32, 1.0 / TILE_SIZE as f32, 1.0));
+pub const PIXEL_MODEL_TRANSFORM: Transform = Transform::from_scale(Vec3::new(
+    1.0 / TILE_SIZE as f32,
+    1.0 / TILE_SIZE as f32,
+    1.0,
+));
 
 // Create the animation asset
 #[derive(Clone, Component)]
