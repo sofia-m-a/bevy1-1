@@ -5,42 +5,34 @@
 // use benimator::*;
 use bevy::{
     prelude::*,
-    render::{
-        camera::ScalingMode,
-        render_resource::{Texture, WgpuLimits},
-        settings::WgpuSettings,
-    },
-    sprite::Anchor,
+    render::{render_resource::WgpuLimits, settings::WgpuSettings},
     transform::TransformSystem,
 };
 use bevy_ecs_tilemap::{prelude::TilemapRenderSettings, TilemapPlugin};
-use bevy_tweening::TweeningPlugin;
-// use bevy_pixel_camera::{PixelBorderPlugin, PixelCameraPlugin, PixelCameraBundle};
-use crate::map::brushes;
 use bevy_rapier2d::prelude::*;
+use bevy_tweening::TweeningPlugin;
 use iyes_loopless::prelude::*;
-use rand_pcg::Pcg64;
 
-use assets::{
-    set_texture_filters_to_nearest, setup_sprites, Animation, AnimationAsset, SpriteAssets,
-    P1_WALK01, PIXEL_MODEL_TRANSFORM, TILE_SIZE,
-};
+mod animation;
 mod assets;
 mod camera;
 mod helpers;
-mod map;
+mod world;
+use animation::{AnimationAsset, AnimationPlugin, AnimationState};
+use assets::{setup_sprites, SpriteAssets, P1_WALK01, PIXEL_MODEL_TRANSFORM, TILE_SIZE};
 use camera::*;
-use map::{add_level_resource, brushes::Gen, level_graph::debug_graph, LevelResource};
+use world::{
+    add_level_resource,
+    brushes::Gen,
+    player::{keyboard_input_system, setup_camera, setup_player, control_switch_input_system},
+    LevelResource,
+};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
 enum GameState {
     Splash,
     Level,
 }
-
-// Create the player component
-#[derive(Default, Component, Deref, DerefMut)]
-pub struct AnimationState(pub benimator::State);
 
 fn main() {
     //debug_graph();
@@ -78,7 +70,7 @@ fn main() {
             update_sofia_camera.after(TransformSystem::TransformPropagate),
         )
         .add_plugin(TweeningPlugin)
-        .add_system(animate)
+        .add_plugin(AnimationPlugin)
         .add_asset::<AnimationAsset>()
         .add_startup_system(add_level_resource)
         .insert_resource(ClearColor(SKY_COLOR))
@@ -90,32 +82,18 @@ fn main() {
             ConditionSet::new()
                 .with_system(setup)
                 .with_system(setup_player)
+                .with_system(setup_camera)
                 .into(),
         )
         .add_system_set(
             ConditionSet::new()
                 .run_in_state(GameState::Level)
-                .with_system(map::chunk_loader)
+                .with_system(world::chunk_loader)
+                .with_system(control_switch_input_system)
                 .with_system(keyboard_input_system)
-                .into(), //.with_system(chunk_loader),
+                .into(),
         )
         .run();
-}
-
-fn animate(
-    time: Res<Time>,
-    animations: Res<Assets<AnimationAsset>>,
-    mut query: Query<(&mut AnimationState, &mut TextureAtlasSprite, &Animation)>,
-) {
-    for (mut player, mut texture, animation) in query.iter_mut() {
-        // Update the state
-        if let Some(a) = animations.get(&animation.0) {
-            player.update(a, time.delta());
-        }
-
-        // Update the texture atlas
-        texture.index = player.frame_index();
-    }
 }
 
 const SKY_COLOR: Color = Color::rgb_linear(0.2, 0.6, 1.0);
@@ -124,100 +102,14 @@ fn update_clear_colour(mut commands: Commands) {
     commands.insert_resource(NextState(GameState::Level));
 }
 
-#[derive(Component)]
-struct Player;
-
-fn keyboard_input_system(
-    mut player: Query<(&mut ExternalImpulse, With<Player>)>,
-    keyboard_input: Res<Input<KeyCode>>,
-) {
-    let mut dir = Vec2::ZERO;
-
-    if keyboard_input.pressed(KeyCode::Left) {
-        dir += Vec2::new(-1.0, 0.0);
-    }
-
-    if keyboard_input.pressed(KeyCode::Right) {
-        dir += Vec2::new(1.0, 0.0);
-    }
-
-    if keyboard_input.pressed(KeyCode::Down) {
-        dir += Vec2::new(0.0, -1.0);
-    }
-
-    if keyboard_input.pressed(KeyCode::Up) {
-        dir += Vec2::new(0.0, 1.0);
-    }
-
-    if dir != Vec2::ZERO && let Some(mut p) = player.iter_mut().next() {
-        p.0.impulse = (1.0 * dir).into();
-    }
-}
-
 fn setup(
-    mut commands: Commands,
+    mut _commands: Commands,
     mut rapier: ResMut<RapierConfiguration>,
-    border: Res<BorderColor>,
     mut color: ResMut<ClearColor>,
 ) {
-    let camera = commands
-        .spawn(LetterboxCameraBundle::default())
-        .insert(SofiaCamera {
-            snap: 0.0,
-            target_center: Vec2::ZERO,
-            target_size: Vec2::new(10.0, 10.0),
-        })
-        .id();
-    spawn_borders(&mut commands, camera, border);
-
     // physics
     rapier.gravity = Vec2::new(0.0, 0.0).into();
 
     // clear color for sky
     *color = ClearColor(SKY_COLOR);
-}
-
-fn setup_player(mut commands: Commands, level: Res<LevelResource>, graphics: Res<SpriteAssets>) {
-    let player_size = [P1_WALK01[2], P1_WALK01[3]];
-    let (w, h) = (
-        player_size[0] as f32 / TILE_SIZE as f32,
-        player_size[1] as f32 / TILE_SIZE as f32,
-    );
-
-    let player_model = commands
-        .spawn(SpriteSheetBundle {
-            texture_atlas: graphics.player_atlas.clone(),
-            ..Default::default()
-        })
-        .insert(PIXEL_MODEL_TRANSFORM)
-        .insert(VisibilityBundle::default())
-        .insert(graphics.p1_walk_animation.clone())
-        .insert(AnimationState::default())
-        .id();
-
-    let player = commands
-        .spawn(Player)
-        .insert(CameraGuide::Center)
-        .insert(RigidBody::Dynamic)
-        .insert(Collider::cuboid(w * 0.5, h * 0.5))
-        .insert(Ccd::enabled())
-        .insert(Sleeping::disabled())
-        .insert(LockedAxes::ROTATION_LOCKED)
-        .insert(ExternalImpulse::default())
-        .with_children(|parent| {
-            parent
-                .spawn(CameraGuide::MustBeOnscreen)
-                .insert(TransformBundle::from_transform(
-                    Transform::from_translation(Vec3::new(-12.0, -8.0, 0.0)),
-                ));
-            parent
-                .spawn(CameraGuide::MustBeOnscreen)
-                .insert(TransformBundle::from_transform(
-                    Transform::from_translation(Vec3::new(12.0, 8.0, 0.0)),
-                ));
-        })
-        .insert(SpatialBundle::default())
-        .add_child(player_model)
-        .id();
-    commands.entity(level.0).add_child(player);
 }

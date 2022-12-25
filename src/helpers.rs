@@ -1,7 +1,8 @@
 use std::iter::FusedIterator;
 
+use bevy::prelude::Vec2;
 use enum_iterator::Sequence;
-use num_traits::{FromPrimitive, PrimInt};
+use num_traits::{AsPrimitive, FromPrimitive, PrimInt};
 use rstar::AABB;
 use std::fmt::Debug;
 
@@ -69,6 +70,36 @@ impl<T: PrimInt> Box1<T> {
         Box1Iter {
             lo_incl: self.lo_incl,
             hi_excl: self.hi_excl,
+        }
+    }
+}
+
+impl<T: PrimInt + AsPrimitive<f32>> Box1<T> {
+    pub fn center(self) -> f32 {
+        self.lo_incl.as_() + self.size().as_() / 2.0
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum SubtractResult<T: PrimInt> {
+    None,
+    One(Box1<T>),
+    Two(Box1<T>, Box1<T>),
+}
+
+impl<T: PrimInt> Box1<T> {
+    pub fn subtract(self, other: Self) -> SubtractResult<T> {
+        if self.lo_incl >= other.lo_incl && self.hi_excl <= other.hi_excl {
+            return SubtractResult::None;
+        } else if self.lo_incl >= other.lo_incl {
+            return SubtractResult::One(Box1::new(other.hi_excl, self.hi_excl));
+        } else if self.hi_excl <= other.hi_excl {
+            return SubtractResult::One(Box1::new(self.lo_incl, other.lo_incl));
+        } else {
+            return SubtractResult::Two(
+                Box1::new(self.lo_incl, other.lo_incl),
+                Box1::new(other.hi_excl, self.hi_excl),
+            );
         }
     }
 }
@@ -207,16 +238,18 @@ impl<T: PrimInt> Box2<T> {
     }
 }
 
-// fn n_to_01(n: f64) -> f64 {
-//     0.5 * (n + 0.1)
-// }
+impl<T: PrimInt + AsPrimitive<f32>> Box2<T> {
+    pub fn center(self) -> Vec2 {
+        Vec2::new(self.x.center(), self.y.center())
+    }
+}
 
 pub fn n_to_bool(n: f64) -> bool {
-    n.floor() as u32 % 2 == 0
+    n < 0.5
 }
 
 pub fn n_to_enum<T: Sequence + FromPrimitive>(n: f64) -> T {
-    T::from_u32(((T::CARDINALITY as f64) * n).floor() as u32).unwrap_or(T::from_u32(0).unwrap())
+    T::from_u32(((T::CARDINALITY as f64) * n).floor() as u32).unwrap()
 }
 
 pub fn n_to_slice<T: Copy>(n: f64, slice: &[T]) -> T {
@@ -227,18 +260,29 @@ pub fn n_to_range<T: PrimInt + FromPrimitive>(n: f64, top: T) -> T {
     T::from_f64(n.floor()).unwrap() % top
 }
 
-pub fn n_to_box1<T: PrimInt + FromPrimitive + Debug>(n: f64, box1: Box1<T>) -> T {
+pub fn n_to_box1<T: PrimInt + FromPrimitive>(n: f64, box1: Box1<T>) -> T {
+    assert!(box1.size() > T::zero());
     let out = T::from_f64((n * box1.size().to_f64().unwrap()).floor()).unwrap() + box1.lo_incl;
     assert!(box1.contains(out));
     out
 }
 
-pub fn n_to_fitted_box1<T: PrimInt + FromPrimitive>(n: f64, size: T, range: Box1<T>) -> Box1<T> {
+pub fn n_to_fitted_box1<T: PrimInt + FromPrimitive>(
+    n: f64,
+    size: T,
+    range: Box1<T>,
+) -> Option<Box1<T>> {
     if range.size() < size {
-        return Box1::new(range.lo_incl, range.lo_incl);
+        return None;
     }
     let start = n_to_range(n, range.size() - size + T::one());
-    Box1::new(range.lo_incl + start, range.lo_incl + start + size)
+    assert!(
+        range.lo_incl + start >= range.lo_incl && range.lo_incl + start + size <= range.hi_excl
+    );
+    Some(Box1::new(
+        range.lo_incl + start,
+        range.lo_incl + start + size,
+    ))
 }
 
 pub fn n_to_fitted_box2<T: PrimInt + FromPrimitive>(
@@ -246,11 +290,11 @@ pub fn n_to_fitted_box2<T: PrimInt + FromPrimitive>(
     m: f64,
     size: (T, T),
     range: Box2<T>,
-) -> Box2<T> {
-    Box2::from_box1s(
-        n_to_fitted_box1(n, size.0, range.x),
-        n_to_fitted_box1(m, size.1, range.y),
-    )
+) -> Option<Box2<T>> {
+    Some(Box2::from_box1s(
+        n_to_fitted_box1(n, size.0, range.x)?,
+        n_to_fitted_box1(m, size.1, range.y)?,
+    ))
 }
 
 impl From<Box1<i32>> for AABB<(i32,)> {
@@ -261,6 +305,9 @@ impl From<Box1<i32>> for AABB<(i32,)> {
 
 impl From<Box2<i32>> for AABB<(i32, i32)> {
     fn from(b: Box2<i32>) -> Self {
-        AABB::from_corners((b.x.lo_incl, b.y.lo_incl), (b.x.hi_excl - 1, b.y.hi_excl))
+        AABB::from_corners(
+            (b.x.lo_incl, b.y.lo_incl),
+            (b.x.hi_excl - 1, b.y.hi_excl - 1),
+        )
     }
 }

@@ -35,69 +35,16 @@ pub fn get_camera_rect(camera_transform: &Transform, proj: &LetterboxProjection)
 
 #[derive(Debug, Component)]
 pub struct SofiaCamera {
-    //pub center_s: FirstOrderSmoother2,
-    //pub size_s: FirstOrderSmoother2,
-    pub snap: f32,
-    pub target_center: Vec2,
-    pub target_size: Vec2,
+    pub target_transform: Transform,
 }
 
-// #[derive(Clone, Copy, Debug, Component)]
-// pub struct FirstOrderSmoother2 {
-//     // units per second
-//     pub velocity: Vec2,
-//     // units per second per second
-//     pub max_acceleration: f32,
-//     pub target_position: Vec2,
-// }
-
-// impl FirstOrderSmoother2 {
-//     pub fn from_max_accel(a: f32) -> Self {
-//         Self {
-//             velocity: Default::default(),
-//             max_acceleration: a,
-//             target_position: Default::default(),
-//         }
-//     }
-// }
-
-// impl FirstOrderSmoother2 {
-//     pub fn update(&mut self, transform: Vec2, dt: f32) -> Vec2 {
-//         let predicted = transform + self.velocity * dt;
-//         let dx = self.target_position - predicted;
-//         let target_dv = dx / dt;
-//         let dv = target_dv - self.velocity;
-//         let a = dv.length() / dt;
-//         let a = f32::min(1.0, a);
-//         self.velocity += dv.normalize_or_zero() * a;
-//         self.velocity * dt
-//         // let dx = self.target_position - transform;
-//         // let target_v = dx / dt;
-//         // let new = target_v - self.velocity;
-//         // //dbg!(*self, transform, dx, target_v, new);
-//         // self.velocity += new * f32::min(1.0, dt * self.max_acceleration / new.length());
-//         // //dbg!(self.velocity);
-//         // self.velocity * dt
-//     }
-// }
-
-// #[cfg(test)]
-// mod tests {
-//     use bevy::prelude::Vec2;
-
-//     use super::FirstOrderSmoother2;
-
-//     #[test]
-//     fn exploration() {
-//         let mut smoother = FirstOrderSmoother2::from_max_accel(1.0);
-//         let mut position = Vec2::new(0.0, 0.0);
-//         smoother.target_position = Vec2::new(10.0, 10.0);
-//         for i in 0..100 {
-//             position = smoother.update(position, 0.1);
-//             println!("{}", position);
-//         }
-//     }
-// }
+impl SofiaCamera {
+    pub fn new(t: Transform) -> Self {
+        Self {
+            target_transform: t,
+        }
+    }
+}
 
 struct TransLerp(Transform);
 
@@ -114,7 +61,7 @@ impl Lerp for TransLerp {
 
 pub fn update_sofia_camera(
     time: Res<Time>,
-    guides: Query<(&CameraGuide, &GlobalTransform), Without<SofiaCamera>>,
+    guides: Query<(&CameraGuide, &GlobalTransform, &ComputedVisibility), Without<SofiaCamera>>,
     mut cams: Query<(&mut Transform, &LetterboxProjection, &mut SofiaCamera)>,
 ) {
     for (mut cam_trans, proj, mut cam) in cams.iter_mut() {
@@ -125,81 +72,78 @@ pub fn update_sofia_camera(
         let mut lowest = None;
         let mut highest = None;
 
-        for (&guide, &transform) in guides.iter() {
-            let transform = transform.compute_transform();
-            match guide {
-                CameraGuide::Attractor { attraction_radius } => {
-                    let delta = transform.translation.xy() - cam_trans.translation.xy();
-                    let r_2 = delta.length_squared();
-                    let a_2 = attraction_radius * attraction_radius;
-                    let distance_inside_2 = f32::max(0.0, (a_2 - r_2) / a_2);
-                    center_sum += delta * distance_inside_2.powi(2);
-                    center_n += 1.0;
-                }
-                CameraGuide::Center => {
-                    center_sum += transform.translation.xy();
-                    center_n += 1.0;
-                    lowest = Some(
-                        lowest
-                            .unwrap_or(transform.translation.xy())
-                            .min(transform.translation.xy()),
-                    );
-                    highest = Some(
-                        highest
-                            .unwrap_or(transform.translation.xy())
-                            .max(transform.translation.xy()),
-                    );
-                }
-                CameraGuide::MustBeOnscreen => {
-                    lowest = Some(
-                        lowest
-                            .unwrap_or(transform.translation.xy())
-                            .min(transform.translation.xy()),
-                    );
-                    highest = Some(
-                        highest
-                            .unwrap_or(transform.translation.xy())
-                            .max(transform.translation.xy()),
-                    );
+        for (&guide, &transform, vis) in guides.iter() {
+            if vis.is_visible_in_hierarchy() {
+                let transform = transform.compute_transform();
+                match guide {
+                    CameraGuide::Attractor { attraction_radius } => {
+                        let delta = transform.translation.xy() - cam_trans.translation.xy();
+                        let r_2 = delta.length_squared();
+                        let a_2 = attraction_radius * attraction_radius;
+                        let distance_inside_2 = f32::max(0.0, (a_2 - r_2) / a_2);
+                        center_sum += delta * distance_inside_2.powi(2);
+                        center_n += 1.0;
+                    }
+                    CameraGuide::Center => {
+                        center_sum += transform.translation.xy();
+                        center_n += 1.0;
+                        lowest = Some(
+                            lowest
+                                .unwrap_or(transform.translation.xy())
+                                .min(transform.translation.xy()),
+                        );
+                        highest = Some(
+                            highest
+                                .unwrap_or(transform.translation.xy())
+                                .max(transform.translation.xy()),
+                        );
+                    }
+                    CameraGuide::MustBeOnscreen => {
+                        lowest = Some(
+                            lowest
+                                .unwrap_or(transform.translation.xy())
+                                .min(transform.translation.xy()),
+                        );
+                        highest = Some(
+                            highest
+                                .unwrap_or(transform.translation.xy())
+                                .max(transform.translation.xy()),
+                        );
+                    }
                 }
             }
         }
 
-        if center_n > 0.0 {
-            cam.target_center = center_sum / center_n;
-        }
+        let center = if center_n > 0.0 {
+            center_sum / center_n
+        } else {
+            warn!("No centers for camera to follow");
+            Vec2::ZERO
+        };
 
         let size = match (lowest, highest) {
             (Some(vl), Some(vh)) => Vec2::max(
-                (vl - cam.target_center).abs(),
-                (vh - cam.target_center).abs(),
+                (vl - cam.target_transform.translation.xy()).abs(),
+                (vh - cam.target_transform.translation.xy()).abs(),
             ),
-            (Some(v), None) | (None, Some(v)) => v - cam.target_center,
+            (Some(v), None) | (None, Some(v)) => v - cam.target_transform.translation.xy(),
             (None, None) => Vec2::new(1.0, 1.0),
         };
 
         let size = Vec2::new(size.x, size.y / aspect);
         let size = f32::max(size.x, size.y);
-        cam.target_size = Vec2::new(size, size);
 
-        if cam.snap > 1.0
-            && (cam_trans.scale.xy() != cam.target_center
-                || cam_trans.scale.xy() != cam.target_size)
-        {
-            cam.snap = 0.0;
-        }
+        let old_transform = cam.target_transform;
+        cam.target_transform = Transform {
+            translation: center.extend(cam_trans.translation.z),
+            rotation: cam_trans.rotation,
+            scale: Vec2::new(size, size).extend(cam_trans.scale.z),
+        };
 
-        let x = cam.snap.cubic_in();
-        *cam_trans = TransLerp(*cam_trans)
-            .lerp(
-                &TransLerp(
-                    Transform::from_translation(cam.target_center.extend(cam_trans.translation.z))
-                        .with_scale(cam.target_size.extend(cam_trans.scale.z)),
-                ),
-                &x,
-            )
-            .0;
-        cam.snap += 1.0 * time.delta_seconds();
+        let dt = 5.0 * time.delta_seconds();
+        let a = TransLerp(*cam_trans).lerp(&TransLerp(old_transform), &dt);
+        let b = TransLerp(old_transform).lerp(&TransLerp(cam.target_transform), &dt);
+        *cam_trans = a.lerp(&b, &dt).0;
     }
 }
 
@@ -367,10 +311,10 @@ pub fn spawn_borders(commands: &mut Commands, camera: Entity, color: Res<BorderC
 }
 
 fn resize_borders(
-    cameras: Query<(Entity, &LetterboxProjection, &Children), Changed<LetterboxProjection>>,
+    cameras: Query<(&LetterboxProjection, &Children), Changed<LetterboxProjection>>,
     mut borders: Query<(&mut Sprite, &mut Transform, &Border), Without<LetterboxProjection>>,
 ) {
-    if let Ok((e, projection, children)) = cameras.get_single() {
+    if let Ok((projection, children)) = cameras.get_single() {
         let alpha = 1.0 / projection.desired_aspect_ratio;
 
         for &child in children.iter() {

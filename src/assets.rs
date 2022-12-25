@@ -1,4 +1,6 @@
-use bevy::{prelude::*, reflect::TypeUuid, render::render_resource::TextureUsages};
+use bevy::prelude::*;
+
+use crate::animation::{Animation, AnimationAsset};
 
 pub const TILE_SIZE: u32 = 70;
 pub const SHEET_W: u16 = 28;
@@ -9,19 +11,16 @@ pub const PIXEL_MODEL_TRANSFORM: Transform = Transform::from_scale(Vec3::new(
     1.0,
 ));
 
-// Create the animation asset
-#[derive(Clone, Component)]
-pub struct Animation(pub Handle<AnimationAsset>);
-
-#[derive(TypeUuid, Deref)]
-#[uuid = "ae6a74db-f6fa-43c4-ac16-01d13b50e4c6"]
-pub struct AnimationAsset(pub benimator::Animation);
-
 #[derive(Resource)]
 pub struct SpriteAssets {
     pub tile_texture: Handle<Image>,
     pub player_atlas: Handle<TextureAtlas>,
     pub p1_walk_animation: Animation,
+    pub p2_walk_animation: Animation,
+    pub p3_walk_animation: Animation,
+    pub kenney_pixel_font: Handle<Font>,
+    pub text_style: TextStyle,
+    pub blank_texture: Handle<Image>,
 }
 
 pub fn setup_sprites(
@@ -60,11 +59,31 @@ pub fn setup_sprites(
     let p1_walk_animation = Animation(animations.add(AnimationAsset(
         benimator::Animation::from_indices(5..=15, benimator::FrameRate::from_fps(20.0)),
     )));
+    let p2_walk_animation = Animation(animations.add(AnimationAsset(
+        benimator::Animation::from_indices(5..=15, benimator::FrameRate::from_fps(20.0)),
+    )));
+    let p3_walk_animation = Animation(animations.add(AnimationAsset(
+        benimator::Animation::from_indices(5..=15, benimator::FrameRate::from_fps(20.0)),
+    )));
+
+    let kenney_pixel_font = assets.load("kenney_fontpackage/Fonts/Kenney Pixel.ttf");
+    let text_style = TextStyle {
+        font: kenney_pixel_font.clone(),
+        font_size: 60.0,
+        color: Color::WHITE,
+    };
+
+    let blank_texture = assets.load("1x1.png");
 
     commands.insert_resource(SpriteAssets {
         tile_texture: texture_handle,
         player_atlas: atlases.add(player_atlas),
         p1_walk_animation,
+        p2_walk_animation,
+        p3_walk_animation,
+        kenney_pixel_font,
+        text_style,
+        blank_texture,
     });
 }
 
@@ -118,19 +137,3 @@ pub const P3_WALK08: [u32; 4] = [292, 0, 72, 97];
 pub const P3_WALK09: [u32; 4] = [219, 98, 72, 97];
 pub const P3_WALK10: [u32; 4] = [365, 0, 72, 97];
 pub const P3_WALK11: [u32; 4] = [292, 98, 72, 97];
-
-pub fn set_texture_filters_to_nearest(
-    mut texture_events: EventReader<AssetEvent<Image>>,
-    mut textures: ResMut<Assets<Image>>,
-) {
-    // quick and dirty, run this for all textures anytime a texture is created.
-    for event in texture_events.iter() {
-        if let AssetEvent::Created { handle } = event {
-            if let Some(mut texture) = textures.get_mut(handle) {
-                texture.texture_descriptor.usage = TextureUsages::TEXTURE_BINDING
-                    | TextureUsages::COPY_SRC
-                    | TextureUsages::COPY_DST;
-            }
-        }
-    }
-}

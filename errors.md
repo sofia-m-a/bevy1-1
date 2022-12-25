@@ -18,3 +18,8 @@ slime drip as particles?
 levels, buttons, keys, diamonds: items
 
 composable, overlayable tiles (yak shaving)
+slope tiling errors
+split brushes into tiles/brushes
+heightmap fixes
+zone crossover fixes
+proper layering
