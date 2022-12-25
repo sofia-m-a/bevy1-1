@@ -18,9 +18,7 @@ mod world;
 use assets::{setup_sprites};
 use camera::*;
 use world::{
-    add_level_resource,
     brushes::Gen,
-    player::{keyboard_input_system, setup_camera},
 };
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
@@ -39,7 +37,7 @@ fn main() {
         .add_loopless_state(GameStateLevel)
         .add_plugins(DefaultPlugins.set(bevy::render::texture::ImagePlugin::default_nearest()))
         .insert_resource(TilemapRenderSettings {
-            render_chunk_size: UVec2::new(500, 32),
+            render_chunk_size: UVec2::new(128, 32),
         })
         .add_plugin(TilemapPlugin)
         .add_system_to_stage(
@@ -53,7 +51,6 @@ fn main() {
             CoreStage::PostUpdate,
             update_sofia_camera.after(TransformSystem::TransformPropagate),
         )
-        .add_startup_system(add_level_resource)
         .insert_resource(ClearColor(SKY_COLOR))
         .add_enter_system(GameStateLevel, setup_sprites)
         .init_resource::<Gen>()

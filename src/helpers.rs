@@ -252,10 +252,6 @@ pub fn n_to_enum<T: Sequence + FromPrimitive>(n: f64) -> T {
     T::from_u32(((T::CARDINALITY as f64) * n).floor() as u32).unwrap()
 }
 
-pub fn n_to_slice<T: Copy>(n: f64, slice: &[T]) -> T {
-    slice[(((slice.len() as f64) * n).floor()) as usize]
-}
-
 pub fn n_to_range<T: PrimInt + FromPrimitive>(n: f64, top: T) -> T {
     T::from_f64(n.floor()).unwrap() % top
 }
@@ -282,18 +278,6 @@ pub fn n_to_fitted_box1<T: PrimInt + FromPrimitive>(
     Some(Box1::new(
         range.lo_incl + start,
         range.lo_incl + start + size,
-    ))
-}
-
-pub fn n_to_fitted_box2<T: PrimInt + FromPrimitive>(
-    n: f64,
-    m: f64,
-    size: (T, T),
-    range: Box2<T>,
-) -> Option<Box2<T>> {
-    Some(Box2::from_box1s(
-        n_to_fitted_box1(n, size.0, range.x)?,
-        n_to_fitted_box1(m, size.1, range.y)?,
     ))
 }
 

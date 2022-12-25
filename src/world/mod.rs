@@ -1,6 +1,5 @@
 pub mod brushes;
 pub mod feature;
-pub mod player;
 pub mod tile;
 
 use bevy::{
@@ -44,23 +43,8 @@ pub fn intersect(r: Rect) -> impl Iterator<Item = Place> {
 #[derive(Component, Clone, Copy, Debug)]
 pub struct Chunk;
 
-#[derive(Copy, Clone, Component, PartialEq, Eq, Debug, Hash)]
-pub struct LevelEntity;
-
-#[derive(Clone, Copy, Resource)]
-pub struct LevelResource(pub Entity);
-
-pub fn add_level_resource(mut commands: Commands) {
-    let entity = commands
-        .spawn(LevelEntity)
-        .insert(SpatialBundle::default())
-        .id();
-    commands.insert_resource(LevelResource(entity));
-}
-
 fn debug_load_chunk(
     commands: &mut Commands,
-    level: Res<LevelResource>,
     sa: Res<SpriteAssets>,
     chunk_place: Place,
 ) {
@@ -74,7 +58,6 @@ fn debug_load_chunk(
             ),
         )))
         .id();
-    commands.entity(level.0).add_child(chunk);
     let mut storage = TileStorage::empty(TilemapSize { x: 20, y: 20 });
     let tilemap_entity = commands.spawn_empty().id();
     fill_tilemap(
@@ -229,12 +212,10 @@ fn feature_text(
 
 fn load_chunk(
     commands: &mut Commands,
-    level: Res<LevelResource>,
     res_gen: Res<Gen>,
     sa: Res<SpriteAssets>,
     chunk_place: Place,
 ) {
-    let schema = generate_level(&res_gen);
     let bounds = Box2::from_box1s(
         Box1::new(
             chunk_place.x * CHUNK_SIZE as i32,
@@ -251,10 +232,10 @@ fn load_chunk(
         chunk_place.y as f32 * CHUNK_SIZE as f32,
     );
 
+    let schema = generate_level(&res_gen);
     let v = render_level(&schema, &res_gen, bounds);
+    
     let chunk = commands.spawn(Chunk).insert(SpatialBundle::default()).id();
-    //.insert(RigidBody::Fixed)
-    commands.entity(level.0).add_child(chunk);
 
     let chunk_text = commands
         .spawn(Text2dBundle {
@@ -349,7 +330,6 @@ fn load_chunk(
 pub fn chunk_loader(
     mut commands: Commands,
     mut chunks: Query<(Entity, &Transform), With<Chunk>>,
-    level: Res<LevelResource>,
     res_gen: Res<Gen>,
     sa: Res<SpriteAssets>,
     views: Query<(&Transform, &LetterboxProjection), With<SofiaCamera>>,
@@ -374,7 +354,6 @@ pub fn chunk_loader(
         for &c in visible.iter() {
             load_chunk(
                 &mut commands,
-                Res::clone(&level),
                 Res::clone(&res_gen),
                 Res::clone(&sa),
                 c,

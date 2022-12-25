@@ -14,13 +14,6 @@ pub const ASPECT_X: u32 = 16;
 pub const ASPECT_Y: u32 = 9;
 pub const ASPECT: f32 = ASPECT_X as f32 / ASPECT_Y as f32;
 
-#[derive(Clone, Copy, Debug, Component)]
-pub enum CameraGuide {
-    Attractor { attraction_radius: f32 },
-    Center,
-    MustBeOnscreen,
-}
-
 pub fn get_camera_rect(camera_transform: &Transform, proj: &LetterboxProjection) -> Rect {
     Rect::from_corners(
         camera_transform
@@ -60,90 +53,82 @@ impl Lerp for TransLerp {
 
 pub fn update_sofia_camera(
     time: Res<Time>,
-    guides: Query<(&CameraGuide, &GlobalTransform, &ComputedVisibility), Without<SofiaCamera>>,
-    mut cams: Query<(&mut Transform, &LetterboxProjection, &mut SofiaCamera)>,
+    guides: Query<&GlobalTransform, (With<FreeCam>, Without<SofiaCamera>)>,
+    mut cams: Query<(&mut Transform, &mut SofiaCamera)>,
 ) {
-    for (mut cam_trans, proj, mut cam) in cams.iter_mut() {
-        let aspect = proj.desired_aspect_ratio;
+    for (mut cam_trans, mut cam) in cams.iter_mut() {
+        let mut center = Vec2::ZERO;
 
-        let mut center_sum = Vec2::ZERO;
-        let mut center_n = 0.0;
-        let mut lowest = None;
-        let mut highest = None;
-
-        for (&guide, &transform, vis) in guides.iter() {
-            if vis.is_visible_in_hierarchy() {
+        for &transform in guides.iter() {
                 let transform = transform.compute_transform();
-                match guide {
-                    CameraGuide::Attractor { attraction_radius } => {
-                        let delta = transform.translation.xy() - cam_trans.translation.xy();
-                        let r_2 = delta.length_squared();
-                        let a_2 = attraction_radius * attraction_radius;
-                        let distance_inside_2 = f32::max(0.0, (a_2 - r_2) / a_2);
-                        center_sum += delta * distance_inside_2.powi(2);
-                        center_n += 1.0;
-                    }
-                    CameraGuide::Center => {
-                        center_sum += transform.translation.xy();
-                        center_n += 1.0;
-                        lowest = Some(
-                            lowest
-                                .unwrap_or(transform.translation.xy())
-                                .min(transform.translation.xy()),
-                        );
-                        highest = Some(
-                            highest
-                                .unwrap_or(transform.translation.xy())
-                                .max(transform.translation.xy()),
-                        );
-                    }
-                    CameraGuide::MustBeOnscreen => {
-                        lowest = Some(
-                            lowest
-                                .unwrap_or(transform.translation.xy())
-                                .min(transform.translation.xy()),
-                        );
-                        highest = Some(
-                            highest
-                                .unwrap_or(transform.translation.xy())
-                                .max(transform.translation.xy()),
-                        );
-                    }
-                }
-            }
+                center = transform.translation.xy();
         }
 
-        let center = if center_n > 0.0 {
-            center_sum / center_n
-        } else {
-            warn!("No centers for camera to follow");
-            Vec2::ZERO
-        };
-
-        let size = match (lowest, highest) {
-            (Some(vl), Some(vh)) => Vec2::max(
-                (vl - cam.target_transform.translation.xy()).abs(),
-                (vh - cam.target_transform.translation.xy()).abs(),
-            ),
-            (Some(v), None) | (None, Some(v)) => v - cam.target_transform.translation.xy(),
-            (None, None) => Vec2::new(1.0, 1.0),
-        };
-
-        let size = Vec2::new(size.x, size.y / aspect);
-        let size = f32::max(size.x, size.y);
-
-        let old_transform = cam.target_transform;
         cam.target_transform = Transform {
             translation: center.extend(cam_trans.translation.z),
             rotation: cam_trans.rotation,
-            scale: Vec2::new(size, size).extend(cam_trans.scale.z),
+            scale: Vec2::new(20.0, 20.0).extend(cam_trans.scale.z),
         };
 
         let dt = 5.0 * time.delta_seconds();
-        let a = TransLerp(*cam_trans).lerp(&TransLerp(old_transform), &dt);
-        let b = TransLerp(old_transform).lerp(&TransLerp(cam.target_transform), &dt);
-        *cam_trans = a.lerp(&b, &dt).0;
+        *cam_trans = TransLerp(*cam_trans).lerp(&TransLerp(cam.target_transform), &dt).0;
     }
+}
+
+
+fn arrows_to_vec(keyboard_input: Res<Input<KeyCode>>) -> Vec2 {
+    let mut dir = Vec2::ZERO;
+
+    if keyboard_input.pressed(KeyCode::Left) {
+        dir += Vec2::new(-1.0, 0.0);
+    }
+
+    if keyboard_input.pressed(KeyCode::Right) {
+        dir += Vec2::new(1.0, 0.0);
+    }
+
+    if keyboard_input.pressed(KeyCode::Down) {
+        dir += Vec2::new(0.0, -1.0);
+    }
+
+    if keyboard_input.pressed(KeyCode::Up) {
+        dir += Vec2::new(0.0, 1.0);
+    }
+
+    dir
+}
+
+#[derive(Clone, Copy, Debug, Component)]
+pub struct FreeCam;
+
+pub fn keyboard_input_system(
+    mut camera: Query<&mut Transform, With<FreeCam>>,
+    keyboard_input: Res<Input<KeyCode>>,
+    time: Res<Time>,
+) {
+    for mut cam in camera.iter_mut() {
+        cam.translation += 60.0 *
+            (arrows_to_vec(Res::clone(&keyboard_input)) * time.delta_seconds()).extend(0.0);
+
+        if keyboard_input.pressed(KeyCode::Z) {
+            cam.scale += (Vec2::new(0.05, 0.05) * time.delta_seconds()).extend(0.0)
+        }
+        if keyboard_input.pressed(KeyCode::X) {
+            cam.scale -= (Vec2::new(0.05, 0.05) * time.delta_seconds()).extend(0.0)
+        }
+    }
+}
+
+pub fn setup_camera(mut commands: Commands, border: Res<BorderColor>) {
+    let camera = commands
+        .spawn(LetterboxCameraBundle::default())
+        .insert(SofiaCamera::new(Transform::default()))
+        .id();
+    spawn_borders(&mut commands, camera, border);
+
+    commands
+        .spawn(FreeCam)
+        .insert(SpatialBundle::default());
 }
 
 #[derive(Debug, Clone, Reflect, Component)]
