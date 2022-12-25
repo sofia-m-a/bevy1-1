@@ -9,7 +9,6 @@ use bevy::{
     sprite::Anchor,
 };
 use bevy_tweening::Lerp;
-use interpolation::Ease;
 
 pub const ASPECT_X: u32 = 16;
 pub const ASPECT_Y: u32 = 9;

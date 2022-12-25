@@ -1,6 +1,5 @@
 pub mod brushes;
 pub mod feature;
-pub mod physics;
 pub mod player;
 pub mod tile;
 
@@ -21,17 +20,13 @@ use brushes::*;
 use noise::NoiseFn;
 use std::collections::HashSet;
 
-use self::{feature::*, physics::collider_for, tile::*};
+use self::{feature::*, tile::*};
 use crate::{
     assets::{SpriteAssets, PIXEL_MODEL_TRANSFORM, SHEET_W, TILE_SIZE},
     camera::{get_camera_rect, LetterboxProjection, SofiaCamera},
     helpers::*,
-    //map::brushes::*,
 };
 
-// OUTDATED:
-// must be a power of two for Morton encoding to work
-// otherwise we need to change CHUNK_SIZE^2 below to to_nearest_pow2(CHUNK_SIZE)^2
 pub const CHUNK_SIZE: usize = 32;
 
 pub type Place = IVec2;
@@ -287,7 +282,7 @@ fn load_chunk(
                 //feature_outline(commands, f, chunk, chunk_place, Res::clone(&sa), Color::WHITE);
             }
             Feature::HillBlock { .. } | Feature::GroundBlock(..) => {
-                //feature_outline(commands, f, chunk, Res::clone(&sa), c);
+                feature_outline(commands, f, chunk, Res::clone(&sa), c);
             }
             _ => (),
         }
@@ -348,18 +343,6 @@ fn load_chunk(
             ) * PIXEL_MODEL_TRANSFORM,
             ..Default::default()
         });
-    }
-
-    for f in schema.intersecting(bounds) {
-        if let Some(collider) = collider_for(f) {
-            let collider = commands
-                .spawn(collider)
-                .insert(TransformBundle::from_transform(
-                    Transform::from_translation(f.bounds().center().extend(0.0)),
-                ))
-                .id();
-            commands.entity(chunk).add_child(collider);
-        }
     }
 }
 
